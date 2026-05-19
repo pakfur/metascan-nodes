@@ -37,7 +37,7 @@ class MetascanClient:
         try:
             r = self._http.get("/api/config")
             return 200 <= r.status_code < 300
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException):
+        except httpx.TransportError:
             return False
 
     # ------------------------------------------------------------------
@@ -46,10 +46,10 @@ class MetascanClient:
     def _request_json(self, method: str, path: str, *, json_body=None, params=None):
         try:
             r = self._http.request(method, path, json=json_body, params=params)
-        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-            raise OfflineError(reason=str(e)) from e
-        except (httpx.ReadTimeout, httpx.TimeoutException) as e:
+        except httpx.TimeoutException as e:
             raise OfflineError(reason=f"timeout: {e}") from e
+        except httpx.TransportError as e:
+            raise OfflineError(reason=str(e)) from e
         if r.status_code >= 400:
             raise ApiError(status_code=r.status_code, body_excerpt=r.text)
         try:
