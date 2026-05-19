@@ -34,10 +34,15 @@ def _from_file() -> tuple[Optional[str], Optional[str]]:
         return None, None
     try:
         data = json.loads(_CONFIG_FILE.read_text())
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return None, None
-    url = data.get("url") or None
-    api_key = data.get("api_key") or None
+    # Type-guard: a hand-edited config can legitimately contain
+    # malformed values (e.g., `{"url": 8700}`). Treat anything that
+    # isn't a non-empty string as unset rather than propagating it.
+    raw_url = data.get("url") if isinstance(data, dict) else None
+    raw_key = data.get("api_key") if isinstance(data, dict) else None
+    url = raw_url if isinstance(raw_url, str) and raw_url else None
+    api_key = raw_key if isinstance(raw_key, str) and raw_key else None
     return url, api_key
 
 

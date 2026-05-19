@@ -69,3 +69,38 @@ def test_empty_string_settings_override_treated_as_unset(monkeypatch, tmp_path):
 
     cfg = resolve_config(settings_override=ClientConfig(url="", api_key=""))
     assert cfg == ClientConfig(url="http://envhost", api_key="envk")
+
+
+def test_corrupt_json_falls_back(monkeypatch, tmp_path):
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text("{ this is not valid json")
+    monkeypatch.setattr("client.config._CONFIG_FILE", cfg_file)
+    monkeypatch.delenv("METASCAN_URL", raising=False)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+
+    cfg = resolve_config(settings_override=None)
+    assert cfg == ClientConfig(url="http://localhost:8700", api_key=None)
+
+
+def test_empty_object_in_file_falls_back(monkeypatch, tmp_path):
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text("{}")
+    monkeypatch.setattr("client.config._CONFIG_FILE", cfg_file)
+    monkeypatch.delenv("METASCAN_URL", raising=False)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+
+    cfg = resolve_config(settings_override=None)
+    assert cfg == ClientConfig(url="http://localhost:8700", api_key=None)
+
+
+def test_non_string_value_in_file_treated_as_unset(monkeypatch, tmp_path):
+    """A config file with `{"url": 8700}` must NOT propagate the int —
+    httpx would fail confusingly downstream. Fall back to env/default."""
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps({"url": 8700, "api_key": None}))
+    monkeypatch.setattr("client.config._CONFIG_FILE", cfg_file)
+    monkeypatch.delenv("METASCAN_URL", raising=False)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+
+    cfg = resolve_config(settings_override=None)
+    assert cfg == ClientConfig(url="http://localhost:8700", api_key=None)
