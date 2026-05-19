@@ -143,10 +143,19 @@ class MetascanSaveImage:
         info = build_png_info(prompt=prompt, workflow=workflow_dict)
 
         # Collision-counter filename: ``<prefix>_<NNNNN>.png`` starting
-        # from the first unused N. Cheap O(n) probe; metascan rigs don't
-        # accumulate millions of files in a single output dir.
+        # at one past the highest existing index. We pick max+1 rather
+        # than len(existing) so a deletion-induced gap doesn't cause us
+        # to overwrite a surviving file.
         existing = list(target_dir.glob(f"{filename_prefix}_*.png"))
-        next_idx = len(existing)
+        max_idx = -1
+        for p in existing:
+            try:
+                idx = int(p.stem.rsplit("_", 1)[-1])
+            except ValueError:
+                continue  # not a numbered file we own; skip
+            if idx > max_idx:
+                max_idx = idx
+        next_idx = max_idx + 1
 
         first_path: Optional[Path] = None
         for i in range(images.shape[0]):

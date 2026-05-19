@@ -188,3 +188,18 @@ def test_execute_skips_workflow_chunk_when_embed_false(tmp_path):
     img.load()
     assert "prompt" in img.info
     assert "workflow" not in img.info
+
+
+def test_execute_does_not_overwrite_when_gap_in_sequence(tmp_path):
+    """If files 00000 and 00002 exist (gap from a deletion at 00001),
+    the next save must write 00003 — not re-use 00002 via len() count."""
+    (tmp_path / "ComfyUI_00000.png").write_bytes(b"x")
+    (tmp_path / "ComfyUI_00002.png").write_bytes(b"y")
+    images = torch.zeros((1, 8, 8, 3), dtype=torch.float32)
+    MetascanSaveImage().save(
+        images=images, directory=str(tmp_path), subpath="",
+        filename_prefix="ComfyUI", embed_workflow=False, prompt=None,
+        extra_pnginfo=None,
+    )
+    assert (tmp_path / "ComfyUI_00002.png").read_bytes() == b"y"  # untouched
+    assert (tmp_path / "ComfyUI_00003.png").exists()
