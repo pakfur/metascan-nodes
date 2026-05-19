@@ -40,14 +40,15 @@ def _cached(client: MetascanClient, method_name: str, fetch: Callable[[], list[s
     now = time.monotonic()
     hit = _CACHE.get(key)
     if hit and (now - hit[0]) < _TTL_SECONDS:
-        return hit[1]
+        # Return a copy so callers can't mutate the cached list.
+        return list(hit[1])
     try:
         value = fetch()
     except (OfflineError, ApiError):
         # Don't cache failures — let next call retry immediately.
         return [OFFLINE_SENTINEL]
     _CACHE[key] = (now, value)
-    return value
+    return list(value)
 
 
 def combo_directories(client: MetascanClient) -> list[str]:

@@ -312,3 +312,17 @@ def test_offline_failure_is_not_cached(client: MetascanClient, base_url: str, co
     route.mock(return_value=httpx.Response(200, json=config_payload))
     out_online = combo_directories(client)
     assert out_online == ["/data/comfy-out", "/data/photos"]
+
+
+@respx.mock
+def test_combo_cache_returns_independent_copies(client: MetascanClient, base_url: str, config_payload):
+    """Mutating the returned list must not poison the cache for the next call."""
+    clear_cache()
+    respx.get(f"{base_url}/api/config").mock(return_value=httpx.Response(200, json=config_payload))
+    a = combo_directories(client)
+    a.append("/should/not/leak")
+    a.append("/another/leak")
+    b = combo_directories(client)
+    assert "/should/not/leak" not in b
+    assert "/another/leak" not in b
+    assert b == ["/data/comfy-out", "/data/photos"]
