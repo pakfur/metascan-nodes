@@ -85,3 +85,106 @@ def test_build_png_info_skips_workflow_when_disabled():
     assert "workflow" not in reloaded.info
     assert "prompt" in reloaded.info
     p.unlink()
+
+
+# ----- INPUT_TYPES dropdown -----
+
+import datetime as dt
+import shutil
+import tempfile
+from unittest.mock import patch
+
+import respx
+import httpx
+
+from nodes.save_image import MetascanSaveImage
+from client.cache import clear_cache, OFFLINE_SENTINEL
+
+
+@respx.mock
+def test_input_types_lists_directories_from_metascan(monkeypatch, base_url, config_payload):
+    """MetascanSaveImage.INPUT_TYPES() hits combo_directories() which
+    hits the real client which respx mocks here."""
+    clear_cache()
+    respx.get(f"{base_url}/api/config").mock(return_value=httpx.Response(200, json=config_payload))
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    # Settings node override must be cleared between tests.
+    import nodes.settings
+    nodes.settings._OVERRIDE = None
+
+    spec = MetascanSaveImage.INPUT_TYPES()
+    dirs = spec["required"]["directory"][0]
+    assert "/data/comfy-out" in dirs
+    assert "/data/photos" in dirs
+
+
+@respx.mock
+def test_input_types_shows_offline_sentinel_when_server_down(monkeypatch, base_url):
+    clear_cache()
+    respx.get(f"{base_url}/api/config").mock(side_effect=httpx.ConnectError("x"))
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import nodes.settings
+    nodes.settings._OVERRIDE = None
+
+    spec = MetascanSaveImage.INPUT_TYPES()
+    dirs = spec["required"]["directory"][0]
+    assert dirs == [OFFLINE_SENTINEL]
+
+
+# ----- execute: file write + pass-through -----
+
+def test_execute_writes_png_and_passes_through_tensor(tmp_path):
+    images = torch.zeros((2, 16, 16, 3), dtype=torch.float32)
+    node = MetascanSaveImage()
+    out_images, out_path = node.save(
+        images=images,
+        directory=str(tmp_path),
+        subpath="",
+        filename_prefix="ComfyUI",
+        embed_workflow=True,
+        prompt=None,
+        extra_pnginfo=None,
+    )
+    assert out_images is images  # identity pass-through
+    p = Path(out_path)
+    assert p.exists() and p.suffix == ".png"
+    # Both batch entries should land on disk.
+    written = sorted(p.parent.glob("ComfyUI_*.png"))
+    assert len(written) == 2
+
+
+def test_execute_strftime_subpath_expanded(tmp_path):
+    images = torch.zeros((1, 8, 8, 3), dtype=torch.float32)
+    with patch("nodes.save_image._utc_now") as mock_now:
+        mock_now.return_value = dt.datetime(2026, 5, 18)
+        MetascanSaveImage().save(
+            images=images, directory=str(tmp_path), subpath="%Y-%m/comfy",
+            filename_prefix="X", embed_workflow=False, prompt=None, extra_pnginfo=None,
+        )
+    assert (tmp_path / "2026-05" / "comfy").exists()
+    assert list((tmp_path / "2026-05" / "comfy").glob("X_*.png"))
+
+
+def test_execute_raises_on_offline_sentinel():
+    images = torch.zeros((1, 8, 8, 3), dtype=torch.float32)
+    with pytest.raises(RuntimeError, match="offline"):
+        MetascanSaveImage().save(
+            images=images, directory=OFFLINE_SENTINEL, subpath="",
+            filename_prefix="X", embed_workflow=False, prompt=None, extra_pnginfo=None,
+        )
+
+
+def test_execute_skips_workflow_chunk_when_embed_false(tmp_path):
+    images = torch.zeros((1, 8, 8, 3), dtype=torch.float32)
+    MetascanSaveImage().save(
+        images=images, directory=str(tmp_path), subpath="",
+        filename_prefix="ComfyUI", embed_workflow=False,
+        prompt={"x": 1}, extra_pnginfo={"workflow": {"nodes": []}},
+    )
+    p = next(tmp_path.glob("ComfyUI_*.png"))
+    img = Image.open(p)
+    img.load()
+    assert "prompt" in img.info
+    assert "workflow" not in img.info

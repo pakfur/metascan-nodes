@@ -59,3 +59,101 @@ def build_png_info(prompt: Optional[dict], workflow: Optional[dict]) -> PngInfo:
     if workflow is not None:
         info.add_text("workflow", json.dumps(workflow))
     return info
+
+
+# --- ComfyUI node integration --------------------------------------------
+
+from client.api import MetascanClient
+from client.cache import combo_directories, OFFLINE_SENTINEL
+from client.config import resolve_config
+from nodes.settings import get_current_override
+
+
+def _utc_now() -> dt.datetime:
+    """Indirection so tests can patch the clock for strftime checks."""
+    return dt.datetime.now()
+
+
+def _build_client() -> MetascanClient:
+    cfg = resolve_config(settings_override=get_current_override())
+    return MetascanClient(config=cfg, timeout=5.0)
+
+
+class MetascanSaveImage:
+    """Save a batch of images into a metascan-watched directory.
+
+    The node does NOT call metascan's API at execute time — the
+    filesystem watcher (or next scan) picks the file up automatically.
+    The only HTTP call happens at INPUT_TYPES() to populate the
+    directory dropdown.
+    """
+
+    CATEGORY = "metascan"
+    OUTPUT_NODE = True
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("images", "file_path")
+    FUNCTION = "save"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> dict:
+        try:
+            dirs = combo_directories(_build_client())
+        except Exception:  # noqa: BLE001 — be defensive at editor-load time
+            dirs = [OFFLINE_SENTINEL]
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "directory": (dirs,),
+                "subpath": ("STRING", {"default": ""}),
+                "filename_prefix": ("STRING", {"default": "ComfyUI"}),
+                "embed_workflow": ("BOOLEAN", {"default": True}),
+            },
+            "hidden": {
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            },
+        }
+
+    def save(
+        self,
+        images: "torch.Tensor",
+        directory: str,
+        subpath: str,
+        filename_prefix: str,
+        embed_workflow: bool,
+        prompt: Optional[dict] = None,
+        extra_pnginfo: Optional[dict] = None,
+    ) -> tuple:
+        if directory == OFFLINE_SENTINEL:
+            raise RuntimeError(
+                "Metascan is offline — cannot resolve a watched directory. "
+                "Bring metascan up or add a MetascanSettings node with the "
+                "correct URL."
+            )
+
+        now = _utc_now()
+        target_dir = resolve_target_dir(directory=directory, subpath=subpath, now=now)
+
+        # extra_pnginfo is what ComfyUI passes for the workflow blob;
+        # canonical key is "workflow" inside the dict.
+        workflow_dict: Optional[dict] = None
+        if embed_workflow and isinstance(extra_pnginfo, dict):
+            workflow_dict = extra_pnginfo.get("workflow")
+
+        info = build_png_info(prompt=prompt, workflow=workflow_dict)
+
+        # Collision-counter filename: ``<prefix>_<NNNNN>.png`` starting
+        # from the first unused N. Cheap O(n) probe; metascan rigs don't
+        # accumulate millions of files in a single output dir.
+        existing = list(target_dir.glob(f"{filename_prefix}_*.png"))
+        next_idx = len(existing)
+
+        first_path: Optional[Path] = None
+        for i in range(images.shape[0]):
+            pil = tensor_to_pil(images[i])
+            out_path = target_dir / f"{filename_prefix}_{next_idx + i:05d}.png"
+            pil.save(out_path, pnginfo=info)
+            if first_path is None:
+                first_path = out_path
+
+        return (images, str(first_path) if first_path else "")
