@@ -66,3 +66,60 @@ def test_trailing_slash_on_base_url_stripped():
     )
     # Internal httpx client stores normalized base.
     assert str(c._http.base_url).rstrip("/") == "http://host:1234"
+
+
+# ----- get_config -----
+
+@respx.mock
+def test_get_config_returns_directories(client: MetascanClient, base_url: str, config_payload):
+    respx.get(f"{base_url}/api/config").mock(return_value=httpx.Response(200, json=config_payload))
+    cfg = client.get_config()
+    assert cfg["directories"] == [
+        {"filepath": "/data/comfy-out", "search_subfolders": True},
+        {"filepath": "/data/photos", "search_subfolders": False},
+    ]
+
+
+@respx.mock
+def test_get_config_raises_offline_on_connect_refused(client: MetascanClient, base_url: str):
+    respx.get(f"{base_url}/api/config").mock(side_effect=httpx.ConnectError("refused"))
+    with pytest.raises(OfflineError):
+        client.get_config()
+
+
+@respx.mock
+def test_get_config_raises_api_error_on_500(client: MetascanClient, base_url: str):
+    respx.get(f"{base_url}/api/config").mock(return_value=httpx.Response(500, text="boom"))
+    with pytest.raises(ApiError) as excinfo:
+        client.get_config()
+    assert excinfo.value.status_code == 500
+
+
+# ----- list_folders (manual filter) -----
+
+@respx.mock
+def test_list_folders_returns_manual_only(client: MetascanClient, base_url: str, folders_payload):
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    out = client.list_folders()
+    names = [f["name"] for f in out]
+    assert names == ["Portraits", "Landscapes"]
+    assert all(f["kind"] == "manual" for f in out)
+
+
+# ----- get_folder -----
+
+@respx.mock
+def test_get_folder_returns_record(client: MetascanClient, base_url: str, folders_payload):
+    target = folders_payload[0]
+    respx.get(f"{base_url}/api/folders/fld_a").mock(return_value=httpx.Response(200, json=target))
+    out = client.get_folder("fld_a")
+    assert out["id"] == "fld_a"
+    assert out["items"] == ["/data/a/img1.png", "/data/a/img2.png", "/data/a/clip.mp4"]
+
+
+@respx.mock
+def test_get_folder_raises_api_error_on_404(client: MetascanClient, base_url: str):
+    respx.get(f"{base_url}/api/folders/missing").mock(return_value=httpx.Response(404, text="not found"))
+    with pytest.raises(ApiError) as excinfo:
+        client.get_folder("missing")
+    assert excinfo.value.status_code == 404

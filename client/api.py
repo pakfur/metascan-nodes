@@ -59,3 +59,24 @@ class MetascanClient:
                 status_code=r.status_code,
                 body_excerpt=f"invalid JSON: {r.text[:200]}",
             ) from e
+
+    # ------------------------------------------------------------------
+    # Config + folders
+    # ------------------------------------------------------------------
+    def get_config(self) -> dict:
+        """Return metascan's full config payload. Callers typically only
+        consume the `directories` array (for the save node dropdown)."""
+        return self._request_json("GET", "/api/config")
+
+    def list_folders(self) -> list[dict]:
+        """Return only `kind=='manual'` folders. Smart folders are filtered
+        client-side because metascan's smart-folder rule engine lives in
+        the frontend; the nodes can't resolve smart membership without a
+        Python evaluator (deferred — see spec §2)."""
+        folders = self._request_json("GET", "/api/folders")
+        return [f for f in folders if f.get("kind") == "manual"]
+
+    def get_folder(self, folder_id: str) -> dict:
+        """Return a single folder record. For manual folders the record
+        already includes a resolved `items: [path, ...]` list."""
+        return self._request_json("GET", f"/api/folders/{folder_id}")
