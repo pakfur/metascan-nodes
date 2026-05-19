@@ -12,6 +12,7 @@ authors = [{ name = "John" }]
 dependencies = [
     "httpx>=0.27",
     "pillow>=10",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
