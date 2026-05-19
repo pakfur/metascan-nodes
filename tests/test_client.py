@@ -245,3 +245,70 @@ def test_target_models_returns_seven_canonical_values(client: MetascanClient, ba
     )
     out = client.target_models()
     assert out == ["sd", "pony", "flux1", "flux2", "zimage", "chroma", "qwen"]
+
+
+# ----- combo cache -----
+
+from client.cache import combo_directories, combo_folders, combo_target_models, OFFLINE_SENTINEL, clear_cache
+
+
+def test_clear_cache_resets_state():
+    # Sanity: clear_cache is callable. Real behavior covered below.
+    clear_cache()
+
+
+@respx.mock
+def test_combo_directories_caches_within_60s(client: MetascanClient, base_url: str, config_payload):
+    clear_cache()
+    route = respx.get(f"{base_url}/api/config").mock(
+        return_value=httpx.Response(200, json=config_payload)
+    )
+    a = combo_directories(client)
+    b = combo_directories(client)
+    assert a == b == ["/data/comfy-out", "/data/photos"]
+    assert route.call_count == 1  # second call served from cache
+
+
+@respx.mock
+def test_combo_folders_returns_only_manual_names(client: MetascanClient, base_url: str, folders_payload):
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(
+        return_value=httpx.Response(200, json=folders_payload)
+    )
+    out = combo_folders(client)
+    assert out == ["Portraits", "Landscapes"]
+
+
+@respx.mock
+def test_combo_target_models_appends_any_virtual_option(client: MetascanClient, base_url: str):
+    clear_cache()
+    respx.get(f"{base_url}/api/prompt/target-models").mock(
+        return_value=httpx.Response(200, json={
+            "target_models": ["sd", "pony", "flux1", "flux2", "zimage", "chroma", "qwen"]
+        })
+    )
+    out = combo_target_models(client)
+    assert out == ["sd", "pony", "flux1", "flux2", "zimage", "chroma", "qwen", "any"]
+
+
+@respx.mock
+def test_combo_returns_offline_sentinel_when_server_down(client: MetascanClient, base_url: str):
+    clear_cache()
+    respx.get(f"{base_url}/api/config").mock(side_effect=httpx.ConnectError("x"))
+    out = combo_directories(client)
+    assert out == [OFFLINE_SENTINEL]
+
+
+@respx.mock
+def test_offline_failure_is_not_cached(client: MetascanClient, base_url: str, config_payload):
+    """If metascan was offline at first call but comes back, the next
+    call must refetch — we don't want a 60s window where the dropdown
+    stays empty after the server recovers."""
+    clear_cache()
+    route = respx.get(f"{base_url}/api/config").mock(side_effect=httpx.ConnectError("x"))
+    out_offline = combo_directories(client)
+    assert out_offline == [OFFLINE_SENTINEL]
+
+    route.mock(return_value=httpx.Response(200, json=config_payload))
+    out_online = combo_directories(client)
+    assert out_online == ["/data/comfy-out", "/data/photos"]
