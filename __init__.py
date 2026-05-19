@@ -1,13 +1,28 @@
 """ComfyUI custom_nodes entry point for metscan-nodes.
 
-The actual NODE_CLASS_MAPPINGS / NODE_DISPLAY_NAME_MAPPINGS exports
-are wired up in Task 20. This file exists now so ComfyUI's loader
-sees a valid Python package and so test modules can `from client...`
-imports succeed at import-time.
+ComfyUI imports this package on startup and looks for the two
+mapping dicts below to register the nodes in its menu.
 """
 
-NODE_CLASS_MAPPINGS: dict = {}
-NODE_DISPLAY_NAME_MAPPINGS: dict = {}
+from nodes.settings import MetascanSettings
+from nodes.save_image import MetascanSaveImage
+from nodes.load_from_folder import MetascanLoadFromFolder
+from nodes.load_prompt import MetascanLoadPrompt
+
+NODE_CLASS_MAPPINGS = {
+    "MetascanSettings": MetascanSettings,
+    "MetascanSaveImage": MetascanSaveImage,
+    "MetascanLoadFromFolder": MetascanLoadFromFolder,
+    "MetascanLoadPrompt": MetascanLoadPrompt,
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "MetascanSettings": "Metascan · Settings",
+    "MetascanSaveImage": "Metascan · Save Image",
+    "MetascanLoadFromFolder": "Metascan · Load From Folder",
+    "MetascanLoadPrompt": "Metascan · Load Prompt",
+}
+
 WEB_DIRECTORY = None
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
