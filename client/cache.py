@@ -68,10 +68,31 @@ def combo_folders(client: MetascanClient) -> list[str]:
     return _cached(client, "combo_folders", fetch)
 
 
+# Hardcoded fallback for combo_target_models when the server doesn't
+# expose /api/prompt/target-models yet (companion metascan PR pending).
+# Per spec §5.3, the load_prompt node must remain usable even before
+# that endpoint lands — so we substitute these seven canonical values
+# plus the "any" virtual option, rather than the OFFLINE_SENTINEL.
+_TARGET_MODELS_FALLBACK = ["sd", "pony", "flux1", "flux2", "zimage", "chroma", "qwen", "any"]
+
+
 def combo_target_models(client: MetascanClient) -> list[str]:
     """Canonical TargetModel literals from GET /api/prompt/target-models
-    plus the virtual 'any' option appended client-side. The node maps
-    'any' → None when issuing search_prompts()."""
-    def fetch() -> list[str]:
-        return [*client.target_models(), "any"]
-    return _cached(client, "combo_target_models", fetch)
+    plus the virtual 'any' option appended client-side. When the endpoint
+    isn't reachable, fall back to the hardcoded list rather than the
+    offline sentinel — the load_prompt node should still be wired up and
+    usable even before the companion metascan PR ships."""
+    base = str(client._http.base_url).rstrip("/")
+    key = (base, "combo_target_models")
+    now = time.monotonic()
+    hit = _CACHE.get(key)
+    if hit and (now - hit[0]) < _TTL_SECONDS:
+        return list(hit[1])
+    try:
+        value = [*client.target_models(), "any"]
+    except (OfflineError, ApiError):
+        # Don't cache the fallback either — we want to refetch as soon
+        # as the endpoint becomes available.
+        return list(_TARGET_MODELS_FALLBACK)
+    _CACHE[key] = (now, value)
+    return list(value)

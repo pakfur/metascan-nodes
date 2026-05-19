@@ -12,11 +12,35 @@ Plus a **Metascan · Settings** sentinel node for overriding URL / API key per w
 
 ## Install
 
+Clone into ComfyUI's `custom_nodes` directory, then install three Python dependencies (`httpx`, `pillow`, `numpy`) *into the same Python environment ComfyUI itself uses*. The exact pip command depends on how ComfyUI is installed.
+
+### ComfyUI Windows Portable
+
+From a Command Prompt or PowerShell in the ComfyUI portable root (the folder containing `ComfyUI\`, `python_embeded\`, and the `run_*.bat` files):
+
 ```
-cd ComfyUI/custom_nodes
+cd ComfyUI\custom_nodes
 git clone <this-repo-url> metscan-nodes
-pip install -r metscan-nodes/requirements.txt   # or: pip install httpx pillow numpy
+cd ..\..
+.\python_embeded\python.exe -m pip install httpx pillow numpy
 ```
+
+Portable ships an embedded interpreter — there's no venv to activate; you invoke `python_embeded\python.exe` by full path.
+
+### ComfyUI installed via venv (Linux / macOS / Windows manual install)
+
+Activate ComfyUI's venv first, then install:
+
+```
+source /path/to/ComfyUI/venv/bin/activate     # Linux / macOS
+# or on Windows:    \path\to\ComfyUI\venv\Scripts\activate
+
+cd /path/to/ComfyUI/custom_nodes
+git clone <this-repo-url> metscan-nodes
+pip install httpx pillow numpy
+```
+
+### After installing
 
 Restart ComfyUI. The four nodes appear under the `metascan` category.
 

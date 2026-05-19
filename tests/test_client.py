@@ -326,3 +326,16 @@ def test_combo_cache_returns_independent_copies(client: MetascanClient, base_url
     assert "/should/not/leak" not in b
     assert "/another/leak" not in b
     assert b == ["/data/comfy-out", "/data/photos"]
+
+
+@respx.mock
+def test_combo_target_models_falls_back_when_endpoint_missing(client: MetascanClient, base_url: str):
+    """Spec §5.3: load_prompt must remain usable before the companion PR
+    lands. combo_target_models should return the seven canonical values +
+    'any' rather than the offline sentinel."""
+    clear_cache()
+    respx.get(f"{base_url}/api/prompt/target-models").mock(
+        return_value=httpx.Response(404, text="not found")
+    )
+    out = combo_target_models(client)
+    assert out == ["sd", "pony", "flux1", "flux2", "zimage", "chroma", "qwen", "any"]
