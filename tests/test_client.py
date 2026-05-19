@@ -123,3 +123,52 @@ def test_get_folder_raises_api_error_on_404(client: MetascanClient, base_url: st
     with pytest.raises(ApiError) as excinfo:
         client.get_folder("missing")
     assert excinfo.value.status_code == 404
+
+
+# ----- get_media_detail -----
+
+@respx.mock
+def test_get_media_detail_url_encodes_path(client: MetascanClient, base_url: str):
+    detail = {"file_path": "/data/a/img 1.png", "data": {"prompt": "hello", "negative_prompt": "blur"}}
+    # Spaces in the path must be URL-encoded once.
+    respx.get(f"{base_url}/api/media/%2Fdata%2Fa%2Fimg%201.png").mock(
+        return_value=httpx.Response(200, json=detail)
+    )
+    out = client.get_media_detail("/data/a/img 1.png")
+    assert out["data"]["prompt"] == "hello"
+    assert out["data"]["negative_prompt"] == "blur"
+
+
+@respx.mock
+def test_get_media_detail_404_raises_api_error(client: MetascanClient, base_url: str):
+    respx.get(f"{base_url}/api/media/%2Fnope.png").mock(return_value=httpx.Response(404, text="nope"))
+    with pytest.raises(ApiError) as excinfo:
+        client.get_media_detail("/nope.png")
+    assert excinfo.value.status_code == 404
+
+
+# ----- stream_bytes -----
+
+@respx.mock
+def test_stream_bytes_returns_raw_bytes(client: MetascanClient, base_url: str):
+    payload = b"\x89PNG\r\n\x1a\n\x00\x00fakepngbytes"
+    respx.get(f"{base_url}/api/stream/%2Fdata%2Fimg.png").mock(
+        return_value=httpx.Response(200, content=payload)
+    )
+    out = client.stream_bytes("/data/img.png")
+    assert out == payload
+
+
+@respx.mock
+def test_stream_bytes_404_raises_api_error(client: MetascanClient, base_url: str):
+    respx.get(f"{base_url}/api/stream/%2Fnope.png").mock(return_value=httpx.Response(404, text="x"))
+    with pytest.raises(ApiError) as excinfo:
+        client.stream_bytes("/nope.png")
+    assert excinfo.value.status_code == 404
+
+
+@respx.mock
+def test_stream_bytes_offline_raises_offline_error(client: MetascanClient, base_url: str):
+    respx.get(f"{base_url}/api/stream/%2Fdata%2Fimg.png").mock(side_effect=httpx.ConnectError("x"))
+    with pytest.raises(OfflineError):
+        client.stream_bytes("/data/img.png")
