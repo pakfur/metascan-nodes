@@ -23,6 +23,7 @@ Metascan already has a **passive** integration with ComfyUI: a metadata extracto
 - Bundling metascan as a dependency or wrapping its internal modules.
 - New auth schemes beyond metascan's existing `X-API-Key` header.
 - A "load similar image" node (would require server-side CLIP, deferred).
+- **Smart folders** in load nodes. Metascan's smart-folder rule engine lives in the frontend (Pinia store); there is no Python evaluator yet. Folder dropdowns expose `manual` folders only. Smart-folder support ships when metascan grows a Python resolver.
 
 ## 3. Architecture
 
@@ -104,7 +105,7 @@ Loads an image from a metascan folder (static or smart), returning the image ten
 
 | Name | Type | Notes |
 |---|---|---|
-| `folder` | COMBO | Dropdown of all folders (static + smart) from `GET /api/folders` |
+| `folder` | COMBO | Dropdown of **manual** folders from `GET /api/folders` (filtered to `kind=="manual"`; smart folders deferred — see §2 non-goals) |
 | `selection_mode` | COMBO | `random` / `sequential` / `specific` |
 | `seed` | INT | RNG seed for `random`; cursor index for `sequential` |
 | `index` | INT | Used only when `selection_mode=specific` |
@@ -119,14 +120,15 @@ Loads an image from a metascan folder (static or smart), returning the image ten
 - `INT` — `next_seed` — advanced cursor for chaining in `sequential` mode
 
 **Behavior:**
-1. `GET /api/media?folder_id={id}&type=image` (or include videos when `image_only=false`).
-2. Apply `filename_filter` substring match client-side. Sort the surviving list deterministically by `file_path`.
-3. Select one row by mode:
-   - `random`: index = `seed % len(rows)`
-   - `sequential`: index = `seed % len(rows)`; `next_seed = (seed + 1) % len(rows)`
-   - `specific`: index = `index % len(rows)` (clamps gracefully)
-4. `GET /api/stream/{file_path}` to fetch bytes. Decode via PIL; convert to NHWC float32 tensor.
-5. Pull `positive_prompt` / `negative_prompt` from the media row's extracted metadata.
+1. `GET /api/folders/{id}` — returns the manual folder record including `items: [path, ...]` (the existing endpoint already resolves manual-folder membership).
+2. Filter client-side: drop videos when `image_only=true` (by extension); apply `filename_filter` substring match. Sort the surviving list deterministically by `file_path`.
+3. Select one path by mode:
+   - `random`: index = `seed % len(paths)`
+   - `sequential`: index = `seed % len(paths)`; `next_seed = (seed + 1) % len(paths)`
+   - `specific`: index = `index % len(paths)` (clamps gracefully)
+4. `GET /api/media/{path:url-encoded}` for the chosen path → returns the media detail record with extracted prompt metadata.
+5. `GET /api/stream/{path:url-encoded}` to fetch bytes. Decode via PIL; convert to NHWC float32 tensor.
+6. Pull `positive_prompt` / `negative_prompt` from the media detail's `data` blob (the extractor populates these fields).
 
 **Error cases:** empty folder → raise with `"folder '{name}' contains no matching items"`; metascan unreachable → raise `OfflineError`.
 
@@ -138,8 +140,8 @@ Loads a saved prompt from metascan's `saved_prompts` table, scoped by folder and
 
 | Name | Type | Notes |
 |---|---|---|
-| `folder` | COMBO | Folder list as in §5.2; scopes which media's `saved_prompts` are searched |
-| `target_model` | COMBO | Populated from `GET /api/prompt/target-models` (new endpoint, §7); fallback hardcoded list if offline: `["SDXL","Pony","Chroma","Qwen","Z-Image","Flux","SD15","Any"]`. When the user selects `"Any"`, the node sends `target_model: null` in the search request (per §7.1). |
+| `folder` | COMBO | Manual-folder list as in §5.2; scopes which media's `saved_prompts` are searched |
+| `target_model` | COMBO | Populated from `GET /api/prompt/target-models` (new endpoint, §7). Fallback hardcoded list if offline: the seven actual `TargetModel` literal values plus `"any"` as a virtual entry: `["sd","pony","flux1","flux2","zimage","chroma","qwen","any"]`. When the user selects `"any"`, the node sends `target_model: null` in the search request (per §7.1). |
 | `selection_mode` | COMBO | `random` / `by_name` |
 | `prompt_name` | STRING | Required when `selection_mode=by_name`; ignored otherwise |
 | `seed` | INT | RNG seed for `random` |
@@ -175,11 +177,12 @@ class MetascanClient:
 
     # Config / folders
     def get_config(self) -> ConfigResponse: ...
-    def list_folders(self) -> list[FolderInfo]: ...
+    def list_folders(self) -> list[FolderInfo]: ...                 # caller filters to kind=="manual"
+    def get_folder(self, folder_id: str) -> FolderInfo: ...         # includes resolved `items` list for manual
 
     # Media
-    def get_media(self, folder_id: int | None, image_only: bool) -> list[MediaRow]: ...
-    def stream_bytes(self, file_path: str) -> bytes: ...
+    def get_media_detail(self, file_path: str) -> MediaDetail: ...  # GET /api/media/{path}
+    def stream_bytes(self, file_path: str) -> bytes: ...            # GET /api/stream/{path}
 
     # Prompts
     def search_prompts(self, folder_id, target_model, name, limit) -> list[SavedPromptRow]: ...
@@ -210,8 +213,8 @@ Search the `saved_prompts` table scoped by folder and target model.
 ```jsonc
 // Request
 {
-  "folder_id": 42,              // nullable: null = all media
-  "target_model": "Qwen",       // nullable: null = any target_model
+  "folder_id": "fld_abc123",    // nullable string (folder IDs are strings in metascan); null = all media
+  "target_model": "qwen",       // nullable: null = any target_model
   "name": "cinematic-portrait", // nullable: exact match if provided
   "limit": 500                  // default 100, max 500
 }
@@ -225,7 +228,7 @@ Search the `saved_prompts` table scoped by folder and target model.
       "name": "cinematic-portrait",
       "prompt": "...",
       "negative": "..." | null,
-      "target_model": "Qwen",
+      "target_model": "qwen",
       "architecture": "...",
       "styles": ["..."]
     }
@@ -233,16 +236,16 @@ Search the `saved_prompts` table scoped by folder and target model.
 }
 ```
 
-**Implementation sketch:** new method `db.search_saved_prompts(folder_id, target_model, name, limit)` joining `saved_prompts` to folder membership. For static folders this is a join with `folder_items`. For smart folders, re-use metascan's existing smart-folder evaluator (the same code path the UI uses) to resolve the membership and then filter `saved_prompts`. Route added to `backend/api/prompt.py`.
+**Implementation sketch:** new method `db.search_saved_prompts(folder_id, target_model, name, limit)` on `metascan/core/database_sqlite.py`. When `folder_id` is supplied, JOIN `saved_prompts` against `folder_items` on `file_path` and filter `folder_items.folder_id = ?`; the folder's `kind` must be `'manual'` (route returns 400 if the supplied folder is smart — see §2 non-goals; smart-folder support deferred until metascan has a Python rule resolver). When `target_model` is supplied, add `AND saved_prompts.target_model = ?`. When `name` is supplied, add `AND saved_prompts.name = ?`. Cap by `LIMIT`. Route added to `backend/api/prompt.py`.
 
 ### 7.2 `GET /api/prompt/target-models`
 
 ```jsonc
 // Response 200
-{ "target_models": ["SDXL","Pony","Chroma","Qwen","Z-Image","Flux","SD15","Any"] }
+{ "target_models": ["sd","pony","flux1","flux2","zimage","chroma","qwen"] }
 ```
 
-**Implementation sketch:** return the values of metascan's existing `TargetModel` enum (`metascan.core.prompt_templates.TargetModel`) plus the literal `"Any"`. Trivial route in `backend/api/prompt.py`.
+**Implementation sketch:** return the seven literal values of metascan's existing `TargetModel = Literal["sd","pony","flux1","flux2","zimage","chroma","qwen"]` (defined in `metascan/core/prompt_templates.py`). The node injects the `"any"` virtual option on the client side (it maps to `target_model=null` in the search request, never sent as a value). Trivial route in `backend/api/prompt.py`.
 
 ## 8. Testing strategy
 
