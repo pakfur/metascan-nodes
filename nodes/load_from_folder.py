@@ -82,3 +82,85 @@ def bytes_to_tensor(data: bytes) -> torch.Tensor:
     arr = np.asarray(pil, dtype=np.float32) / 255.0
     tensor = torch.from_numpy(arr).unsqueeze(0)  # add batch dim
     return tensor
+
+
+# --- ComfyUI node integration --------------------------------------------
+
+from client.api import MetascanClient
+from client.cache import combo_folders, OFFLINE_SENTINEL
+from client.config import resolve_config
+from nodes.settings import get_current_override
+
+
+def _build_client() -> MetascanClient:
+    cfg = resolve_config(settings_override=get_current_override())
+    return MetascanClient(config=cfg, timeout=10.0)
+
+
+def _folder_id_for_name(client: MetascanClient, name: str) -> str:
+    """Resolve a human folder name to its (string) folder ID.
+
+    The dropdown shows names; the API takes IDs. We re-fetch the folder
+    list here rather than relying on the cached name list because the
+    cached version doesn't carry IDs."""
+    for folder in client.list_folders():
+        if folder["name"] == name:
+            return folder["id"]
+    raise RuntimeError(f"folder not found in metascan: {name!r}")
+
+
+class MetascanLoadFromFolder:
+    CATEGORY = "metascan"
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING", "STRING", "INT")
+    RETURN_NAMES = ("image", "file_path", "positive", "negative", "next_seed")
+    FUNCTION = "load"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> dict:
+        try:
+            folders = combo_folders(_build_client())
+        except Exception:  # noqa: BLE001
+            folders = [OFFLINE_SENTINEL]
+        return {
+            "required": {
+                "folder": (folders,),
+                "selection_mode": (["random", "sequential", "specific"],),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2**31 - 1}),
+                "index": ("INT", {"default": 0, "min": 0, "max": 2**31 - 1}),
+                "filename_filter": ("STRING", {"default": ""}),
+                "image_only": ("BOOLEAN", {"default": True}),
+            },
+        }
+
+    def load(
+        self,
+        folder: str,
+        selection_mode: SelectionMode,
+        seed: int,
+        index: int,
+        filename_filter: str,
+        image_only: bool,
+    ) -> tuple:
+        if folder == OFFLINE_SENTINEL:
+            raise RuntimeError(
+                "Metascan is offline — cannot list folders. Bring metascan "
+                "up or correct the MetascanSettings URL."
+            )
+
+        client = _build_client()
+        folder_id = _folder_id_for_name(client, folder)
+        folder_detail = client.get_folder(folder_id)
+        items = folder_detail.get("items", []) or []
+
+        filtered = filter_paths(items, image_only=image_only, filename_filter=filename_filter)
+        chosen, next_seed = select_path(filtered, mode=selection_mode, seed=seed, index=index)
+
+        media = client.get_media_detail(chosen)
+        data = media.get("data") or {}
+        positive = data.get("prompt", "") or ""
+        negative = data.get("negative_prompt", "") or ""
+
+        raw = client.stream_bytes(chosen)
+        tensor = bytes_to_tensor(raw)
+
+        return (tensor, chosen, positive, negative, next_seed)

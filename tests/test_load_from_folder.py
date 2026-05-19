@@ -101,3 +101,106 @@ def test_bytes_to_tensor_returns_nhwc_float():
     assert 0.0 <= t.min() <= t.max() <= 1.0
     # Red channel 128/255 ≈ 0.502.
     assert abs(float(t[0, 0, 0, 0]) - 128/255) < 0.01
+
+
+# =============================================================================
+# MetascanLoadFromFolder — class-level tests (Task 16)
+# =============================================================================
+
+import respx
+import httpx
+from io import BytesIO
+from unittest.mock import patch
+from PIL import Image
+
+from nodes.load_from_folder import MetascanLoadFromFolder
+from client.cache import clear_cache, OFFLINE_SENTINEL
+
+
+def _png_bytes(color=(0, 255, 0), size=(8, 8)):
+    buf = BytesIO()
+    Image.new("RGB", size, color=color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# ----- INPUT_TYPES -----
+
+@respx.mock
+def test_input_types_lists_manual_folder_names(monkeypatch, base_url, folders_payload):
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import nodes.settings
+    nodes.settings._OVERRIDE = None
+
+    spec = MetascanLoadFromFolder.INPUT_TYPES()
+    folder_list = spec["required"]["folder"][0]
+    assert folder_list == ["Portraits", "Landscapes"]
+
+
+# ----- execute -----
+
+@respx.mock
+def test_execute_loads_image_and_metadata(monkeypatch, base_url, folders_payload):
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    # Portraits folder detail (id fld_a, items list).
+    respx.get(f"{base_url}/api/folders/fld_a").mock(
+        return_value=httpx.Response(200, json=folders_payload[0])
+    )
+    # Pick will land on img1.png (sorted-first). Stub its media + bytes.
+    respx.get(f"{base_url}/api/media/%2Fdata%2Fa%2Fimg1.png").mock(
+        return_value=httpx.Response(200, json={
+            "file_path": "/data/a/img1.png",
+            "data": {"prompt": "POSITIVE", "negative_prompt": "NEGATIVE"},
+        })
+    )
+    respx.get(f"{base_url}/api/stream/%2Fdata%2Fa%2Fimg1.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes())
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import nodes.settings
+    nodes.settings._OVERRIDE = None
+
+    node = MetascanLoadFromFolder()
+    image, path, positive, negative, next_seed = node.load(
+        folder="Portraits",
+        selection_mode="sequential",
+        seed=0,
+        index=0,
+        filename_filter="",
+        image_only=True,
+    )
+    assert image.shape == (1, 8, 8, 3)
+    assert path == "/data/a/img1.png"
+    assert positive == "POSITIVE"
+    assert negative == "NEGATIVE"
+    assert next_seed == 1
+
+
+@respx.mock
+def test_execute_raises_on_empty_folder(monkeypatch, base_url, folders_payload):
+    clear_cache()
+    empty_folder = {**folders_payload[1]}   # Landscapes — already empty
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.get(f"{base_url}/api/folders/fld_b").mock(return_value=httpx.Response(200, json=empty_folder))
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import nodes.settings
+    nodes.settings._OVERRIDE = None
+
+    with pytest.raises(RuntimeError, match="no matching"):
+        MetascanLoadFromFolder().load(
+            folder="Landscapes", selection_mode="random", seed=0, index=0,
+            filename_filter="", image_only=True,
+        )
+
+
+def test_execute_raises_on_offline_sentinel():
+    with pytest.raises(RuntimeError, match="offline"):
+        MetascanLoadFromFolder().load(
+            folder=OFFLINE_SENTINEL, selection_mode="random", seed=0, index=0,
+            filename_filter="", image_only=True,
+        )
