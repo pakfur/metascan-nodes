@@ -110,3 +110,34 @@ class MetascanClient:
         if r.status_code >= 400:
             raise ApiError(status_code=r.status_code, body_excerpt=r.text[:500])
         return r.content
+
+    # ------------------------------------------------------------------
+    # Prompts
+    # ------------------------------------------------------------------
+    def search_prompts(
+        self,
+        folder_id: str | None,
+        target_model: str | None,
+        name: str | None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """POST /api/prompt/search — new endpoint added in metascan's
+        companion PR. All three filter fields are nullable; null = no
+        filter. limit is hard-capped at 500 server-side; client caller
+        should respect that."""
+        body = {
+            "folder_id": folder_id,
+            "target_model": target_model,
+            "name": name,
+            "limit": limit,
+        }
+        out = self._request_json("POST", "/api/prompt/search", json_body=body)
+        return out.get("prompts", [])
+
+    def target_models(self) -> list[str]:
+        """Returns metascan's canonical TargetModel literal values:
+        ['sd','pony','flux1','flux2','zimage','chroma','qwen']. The node
+        layer injects 'any' as a virtual UI option that maps back to
+        target_model=None in search_prompts()."""
+        out = self._request_json("GET", "/api/prompt/target-models")
+        return list(out.get("target_models", []))

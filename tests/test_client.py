@@ -172,3 +172,76 @@ def test_stream_bytes_offline_raises_offline_error(client: MetascanClient, base_
     respx.get(f"{base_url}/api/stream/%2Fdata%2Fimg.png").mock(side_effect=httpx.ConnectError("x"))
     with pytest.raises(OfflineError):
         client.stream_bytes("/data/img.png")
+
+
+# ----- search_prompts -----
+
+@respx.mock
+def test_search_prompts_passes_filters_in_body(client: MetascanClient, base_url: str):
+    route = respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": []})
+    )
+    client.search_prompts(folder_id="fld_a", target_model="qwen", name="hero", limit=50)
+    sent = route.calls.last.request
+    assert sent.method == "POST"
+    body = sent.read().decode()
+    import json as _j
+    parsed = _j.loads(body)
+    assert parsed == {
+        "folder_id": "fld_a",
+        "target_model": "qwen",
+        "name": "hero",
+        "limit": 50,
+    }
+
+
+@respx.mock
+def test_search_prompts_omits_none_or_sends_null(client: MetascanClient, base_url: str):
+    route = respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": []})
+    )
+    client.search_prompts(folder_id=None, target_model=None, name=None, limit=100)
+    body = route.calls.last.request.read().decode()
+    import json as _j
+    parsed = _j.loads(body)
+    # All three nullable filters are sent as JSON null so the server's
+    # Pydantic model parses them as Optional[...] = None — see spec §7.1.
+    assert parsed == {"folder_id": None, "target_model": None, "name": None, "limit": 100}
+
+
+@respx.mock
+def test_search_prompts_returns_rows(client: MetascanClient, base_url: str):
+    rows = [
+        {"id": 1, "file_path": "/x.png", "name": "hero", "prompt": "p",
+         "negative": None, "target_model": "qwen", "architecture": "qwen",
+         "styles": []},
+    ]
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": rows})
+    )
+    out = client.search_prompts(folder_id="fld_a", target_model="qwen", name=None, limit=100)
+    assert out == rows
+
+
+@respx.mock
+def test_search_prompts_400_raises_api_error(client: MetascanClient, base_url: str):
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(400, text="smart folders not supported")
+    )
+    with pytest.raises(ApiError) as excinfo:
+        client.search_prompts(folder_id="fld_smart", target_model=None, name=None, limit=100)
+    assert excinfo.value.status_code == 400
+    assert "smart folders" in excinfo.value.body_excerpt
+
+
+# ----- target_models -----
+
+@respx.mock
+def test_target_models_returns_seven_canonical_values(client: MetascanClient, base_url: str):
+    respx.get(f"{base_url}/api/prompt/target-models").mock(
+        return_value=httpx.Response(200, json={
+            "target_models": ["sd", "pony", "flux1", "flux2", "zimage", "chroma", "qwen"]
+        })
+    )
+    out = client.target_models()
+    assert out == ["sd", "pony", "flux1", "flux2", "zimage", "chroma", "qwen"]
