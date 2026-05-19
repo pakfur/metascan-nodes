@@ -45,3 +45,15 @@ def config_payload() -> dict:
         ],
         "watch_directories": True,
     }
+
+
+from client.api import MetascanClient
+from client.config import ClientConfig
+
+
+@pytest.fixture
+def client(base_url: str) -> MetascanClient:
+    return MetascanClient(
+        config=ClientConfig(url=base_url, api_key="test-key"),
+        timeout=2.0,
+    )
