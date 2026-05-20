@@ -47,8 +47,8 @@ def config_payload() -> dict:
     }
 
 
-from client.api import MetascanClient
-from client.config import ClientConfig
+from mscan_client.api import MetascanClient
+from mscan_client.config import ClientConfig
 
 
 @pytest.fixture

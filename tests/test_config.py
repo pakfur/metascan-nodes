@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from client.config import ClientConfig, resolve_config
+from mscan_client.config import ClientConfig, resolve_config
 
 
 def test_defaults_when_nothing_set(monkeypatch, tmp_path):
     monkeypatch.delenv("METASCAN_URL", raising=False)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
-    monkeypatch.setattr("client.config._CONFIG_FILE", tmp_path / "missing.json")
+    monkeypatch.setattr("mscan_client.config._CONFIG_FILE", tmp_path / "missing.json")
 
     cfg = resolve_config(settings_override=None)
 
@@ -21,7 +21,7 @@ def test_defaults_when_nothing_set(monkeypatch, tmp_path):
 def test_env_vars_override_defaults(monkeypatch, tmp_path):
     monkeypatch.setenv("METASCAN_URL", "http://envhost:9000")
     monkeypatch.setenv("METASCAN_API_KEY", "env-key")
-    monkeypatch.setattr("client.config._CONFIG_FILE", tmp_path / "missing.json")
+    monkeypatch.setattr("mscan_client.config._CONFIG_FILE", tmp_path / "missing.json")
 
     cfg = resolve_config(settings_override=None)
 
@@ -33,7 +33,7 @@ def test_file_overrides_defaults_but_env_wins(monkeypatch, tmp_path):
     cfg_file.write_text(json.dumps({
         "url": "http://filehost:7000", "api_key": "file-key",
     }))
-    monkeypatch.setattr("client.config._CONFIG_FILE", cfg_file)
+    monkeypatch.setattr("mscan_client.config._CONFIG_FILE", cfg_file)
     monkeypatch.delenv("METASCAN_URL", raising=False)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
 
@@ -50,7 +50,7 @@ def test_file_overrides_defaults_but_env_wins(monkeypatch, tmp_path):
 def test_settings_override_wins_over_everything(monkeypatch, tmp_path):
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({"url": "http://filehost", "api_key": "filek"}))
-    monkeypatch.setattr("client.config._CONFIG_FILE", cfg_file)
+    monkeypatch.setattr("mscan_client.config._CONFIG_FILE", cfg_file)
     monkeypatch.setenv("METASCAN_URL", "http://envhost")
     monkeypatch.setenv("METASCAN_API_KEY", "envk")
 
@@ -65,7 +65,7 @@ def test_empty_string_settings_override_treated_as_unset(monkeypatch, tmp_path):
     those must not blank out env / file / default values."""
     monkeypatch.setenv("METASCAN_URL", "http://envhost")
     monkeypatch.setenv("METASCAN_API_KEY", "envk")
-    monkeypatch.setattr("client.config._CONFIG_FILE", tmp_path / "missing.json")
+    monkeypatch.setattr("mscan_client.config._CONFIG_FILE", tmp_path / "missing.json")
 
     cfg = resolve_config(settings_override=ClientConfig(url="", api_key=""))
     assert cfg == ClientConfig(url="http://envhost", api_key="envk")
@@ -74,7 +74,7 @@ def test_empty_string_settings_override_treated_as_unset(monkeypatch, tmp_path):
 def test_corrupt_json_falls_back(monkeypatch, tmp_path):
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text("{ this is not valid json")
-    monkeypatch.setattr("client.config._CONFIG_FILE", cfg_file)
+    monkeypatch.setattr("mscan_client.config._CONFIG_FILE", cfg_file)
     monkeypatch.delenv("METASCAN_URL", raising=False)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
 
@@ -85,7 +85,7 @@ def test_corrupt_json_falls_back(monkeypatch, tmp_path):
 def test_empty_object_in_file_falls_back(monkeypatch, tmp_path):
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text("{}")
-    monkeypatch.setattr("client.config._CONFIG_FILE", cfg_file)
+    monkeypatch.setattr("mscan_client.config._CONFIG_FILE", cfg_file)
     monkeypatch.delenv("METASCAN_URL", raising=False)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
 
@@ -98,7 +98,7 @@ def test_non_string_value_in_file_treated_as_unset(monkeypatch, tmp_path):
     httpx would fail confusingly downstream. Fall back to env/default."""
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({"url": 8700, "api_key": None}))
-    monkeypatch.setattr("client.config._CONFIG_FILE", cfg_file)
+    monkeypatch.setattr("mscan_client.config._CONFIG_FILE", cfg_file)
     monkeypatch.delenv("METASCAN_URL", raising=False)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
 

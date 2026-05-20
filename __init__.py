@@ -4,10 +4,10 @@ ComfyUI imports this package on startup and looks for the two
 mapping dicts below to register the nodes in its menu.
 """
 
-from nodes.settings import MetascanSettings
-from nodes.save_image import MetascanSaveImage
-from nodes.load_from_folder import MetascanLoadFromFolder
-from nodes.load_prompt import MetascanLoadPrompt
+from mscan_nodes.settings import MetascanSettings
+from mscan_nodes.save_image import MetascanSaveImage
+from mscan_nodes.load_from_folder import MetascanLoadFromFolder
+from mscan_nodes.load_prompt import MetascanLoadPrompt
 
 NODE_CLASS_MAPPINGS = {
     "MetascanSettings": MetascanSettings,

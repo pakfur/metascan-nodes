@@ -8,7 +8,7 @@ import torch
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
-from nodes.save_image import (
+from mscan_nodes.save_image import (
     resolve_target_dir,
     tensor_to_pil,
     build_png_info,
@@ -97,8 +97,8 @@ from unittest.mock import patch
 import respx
 import httpx
 
-from nodes.save_image import MetascanSaveImage
-from client.cache import clear_cache, OFFLINE_SENTINEL
+from mscan_nodes.save_image import MetascanSaveImage
+from mscan_client.cache import clear_cache, OFFLINE_SENTINEL
 
 
 @respx.mock
@@ -110,8 +110,8 @@ def test_input_types_lists_directories_from_metascan(monkeypatch, base_url, conf
     monkeypatch.setenv("METASCAN_URL", base_url)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
     # Settings node override must be cleared between tests.
-    import nodes.settings
-    nodes.settings._OVERRIDE = None
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
 
     spec = MetascanSaveImage.INPUT_TYPES()
     dirs = spec["required"]["directory"][0]
@@ -125,8 +125,8 @@ def test_input_types_shows_offline_sentinel_when_server_down(monkeypatch, base_u
     respx.get(f"{base_url}/api/config").mock(side_effect=httpx.ConnectError("x"))
     monkeypatch.setenv("METASCAN_URL", base_url)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
-    import nodes.settings
-    nodes.settings._OVERRIDE = None
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
 
     spec = MetascanSaveImage.INPUT_TYPES()
     dirs = spec["required"]["directory"][0]
@@ -157,7 +157,7 @@ def test_execute_writes_png_and_passes_through_tensor(tmp_path):
 
 def test_execute_strftime_subpath_expanded(tmp_path):
     images = torch.zeros((1, 8, 8, 3), dtype=torch.float32)
-    with patch("nodes.save_image._utc_now") as mock_now:
+    with patch("mscan_nodes.save_image._utc_now") as mock_now:
         mock_now.return_value = dt.datetime(2026, 5, 18)
         MetascanSaveImage().save(
             images=images, directory=str(tmp_path), subpath="%Y-%m/comfy",

@@ -1,4 +1,4 @@
-from client.errors import ApiError, OfflineError
+from mscan_client.errors import ApiError, OfflineError
 
 
 def test_api_error_carries_status_and_body():

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from nodes.settings import MetascanSettings, get_current_override
-from client.config import ClientConfig
+from mscan_nodes.settings import MetascanSettings, get_current_override
+from mscan_client.config import ClientConfig
 
 
 def test_input_types_declares_url_and_api_key():

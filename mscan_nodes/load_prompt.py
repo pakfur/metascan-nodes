@@ -9,14 +9,14 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from client.api import MetascanClient
-from client.cache import (
+from mscan_client.api import MetascanClient
+from mscan_client.cache import (
     combo_folders,
     combo_target_models,
     OFFLINE_SENTINEL,
 )
-from client.config import resolve_config
-from nodes.settings import get_current_override
+from mscan_client.config import resolve_config
+from mscan_nodes.settings import get_current_override
 
 
 SelectionMode = Literal["random", "by_name"]

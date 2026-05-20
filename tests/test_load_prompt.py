@@ -4,8 +4,8 @@ import pytest
 import respx
 import httpx
 
-from client.cache import clear_cache, OFFLINE_SENTINEL
-from nodes.load_prompt import MetascanLoadPrompt, select_prompt
+from mscan_client.cache import clear_cache, OFFLINE_SENTINEL
+from mscan_nodes.load_prompt import MetascanLoadPrompt, select_prompt
 
 
 SAMPLE_ROWS = [
@@ -52,8 +52,8 @@ def test_input_types_lists_folders_and_target_models(monkeypatch, base_url, fold
     }))
     monkeypatch.setenv("METASCAN_URL", base_url)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
-    import nodes.settings
-    nodes.settings._OVERRIDE = None
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
 
     spec = MetascanLoadPrompt.INPUT_TYPES()
     folders = spec["required"]["folder"][0]
@@ -72,8 +72,8 @@ def test_execute_maps_any_to_null_target_model(monkeypatch, base_url, folders_pa
     )
     monkeypatch.setenv("METASCAN_URL", base_url)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
-    import nodes.settings
-    nodes.settings._OVERRIDE = None
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
 
     pos, neg, name, src = MetascanLoadPrompt().load(
         folder="Portraits",
@@ -102,8 +102,8 @@ def test_execute_null_negative_becomes_empty_string(monkeypatch, base_url, folde
     )
     monkeypatch.setenv("METASCAN_URL", base_url)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
-    import nodes.settings
-    nodes.settings._OVERRIDE = None
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
 
     pos, neg, name, src = MetascanLoadPrompt().load(
         folder="Portraits", target_model="qwen", selection_mode="by_name",

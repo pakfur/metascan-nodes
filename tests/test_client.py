@@ -4,9 +4,9 @@ import httpx
 import pytest
 import respx
 
-from client.api import MetascanClient
-from client.config import ClientConfig
-from client.errors import ApiError, OfflineError
+from mscan_client.api import MetascanClient
+from mscan_client.config import ClientConfig
+from mscan_client.errors import ApiError, OfflineError
 
 
 @respx.mock
@@ -249,7 +249,7 @@ def test_target_models_returns_seven_canonical_values(client: MetascanClient, ba
 
 # ----- combo cache -----
 
-from client.cache import combo_directories, combo_folders, combo_target_models, OFFLINE_SENTINEL, clear_cache
+from mscan_client.cache import combo_directories, combo_folders, combo_target_models, OFFLINE_SENTINEL, clear_cache
 
 
 def test_clear_cache_resets_state():

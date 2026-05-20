@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from client.config import ClientConfig
+from mscan_client.config import ClientConfig
 
 _OVERRIDE: Optional[ClientConfig] = None
 

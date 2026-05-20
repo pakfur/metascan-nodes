@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from nodes.load_from_folder import (
+from mscan_nodes.load_from_folder import (
     filter_paths,
     select_path,
     bytes_to_tensor,
@@ -113,8 +113,8 @@ from io import BytesIO
 from unittest.mock import patch
 from PIL import Image
 
-from nodes.load_from_folder import MetascanLoadFromFolder
-from client.cache import clear_cache, OFFLINE_SENTINEL
+from mscan_nodes.load_from_folder import MetascanLoadFromFolder
+from mscan_client.cache import clear_cache, OFFLINE_SENTINEL
 
 
 def _png_bytes(color=(0, 255, 0), size=(8, 8)):
@@ -131,8 +131,8 @@ def test_input_types_lists_manual_folder_names(monkeypatch, base_url, folders_pa
     respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
     monkeypatch.setenv("METASCAN_URL", base_url)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
-    import nodes.settings
-    nodes.settings._OVERRIDE = None
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
 
     spec = MetascanLoadFromFolder.INPUT_TYPES()
     folder_list = spec["required"]["folder"][0]
@@ -161,8 +161,8 @@ def test_execute_loads_image_and_metadata(monkeypatch, base_url, folders_payload
     )
     monkeypatch.setenv("METASCAN_URL", base_url)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
-    import nodes.settings
-    nodes.settings._OVERRIDE = None
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
 
     node = MetascanLoadFromFolder()
     image, path, positive, negative, next_seed = node.load(
@@ -188,8 +188,8 @@ def test_execute_raises_on_empty_folder(monkeypatch, base_url, folders_payload):
     respx.get(f"{base_url}/api/folders/fld_b").mock(return_value=httpx.Response(200, json=empty_folder))
     monkeypatch.setenv("METASCAN_URL", base_url)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
-    import nodes.settings
-    nodes.settings._OVERRIDE = None
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
 
     with pytest.raises(RuntimeError, match="no matching"):
         MetascanLoadFromFolder().load(

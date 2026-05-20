@@ -63,10 +63,10 @@ def build_png_info(prompt: Optional[dict], workflow: Optional[dict]) -> PngInfo:
 
 # --- ComfyUI node integration --------------------------------------------
 
-from client.api import MetascanClient
-from client.cache import combo_directories, OFFLINE_SENTINEL
-from client.config import resolve_config
-from nodes.settings import get_current_override
+from mscan_client.api import MetascanClient
+from mscan_client.cache import combo_directories, OFFLINE_SENTINEL
+from mscan_client.config import resolve_config
+from mscan_nodes.settings import get_current_override
 
 
 def _utc_now() -> dt.datetime:
