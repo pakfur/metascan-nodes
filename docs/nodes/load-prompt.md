@@ -13,7 +13,7 @@ Supports per-instance caching so you can iterate on quality / target_model witho
   - `GET /api/folders` (again, for ID lookup) → resolves the chosen folder name to its ID.
   - `POST /api/prompt/search` with `{folder_id, target_model, name, limit=500}` → returns matching saved prompts.
   - `GET /api/stream/{path}` → raw bytes of the source image, decoded to a tensor.
-- **At execute time when `live_load = False`:** nothing. The cached values from the most recent live fetch are reused; only `width` / `height` are recomputed from the current `quality` / `target_model`.
+- **At execute time when `live_load = False`:** nothing. The cached `image`, `name`, and `source_file_path` from the most recent live fetch are reused, prompt text comes from the editable widgets, and `width` / `height` are recomputed from the current `quality` / `target_model`.
 
 This node depends on the companion metascan endpoints `POST /api/prompt/search` and `GET /api/prompt/target-models`, which were added in a separate PR to the metascan repo.
 
@@ -27,7 +27,7 @@ This node depends on the companion metascan endpoints `POST /api/prompt/search` 
 | `prompt_name`    | `STRING`  | *(empty)*   | Required when `selection_mode = by_name`. Ignored in `random` mode.                                                                                  |
 | `seed`           | `INT`     | `0`         | Selection seed for `random` mode. Same seed + same filter set always picks the same row.                                                             |
 | `quality`        | (enum)    | `Fast`      | `Fast` / `Balanced` / `High` / `Ultra`. See [resolution rules](load-from-folder.md#resolution-rules) — algorithm and per-tier pixel budgets are identical to Load From Folder. |
-| `live_load`      | `BOOLEAN` | `True`      | If `True`, fetch from metascan and refresh the cache. If `False`, reuse the cached image + prompt strings and only recompute `width` / `height`.     |
+| `live_load`      | `BOOLEAN` | `True`      | If `True`, fetch from metascan, refresh the cache, and overwrite the `positive_prompt` / `negative_prompt` widgets with the fetched text. If `False`, reuse the cached image + name + path, take prompt text from the widgets, and recompute `width` / `height`. |
 | `positive_prompt`| `STRING`  | *(empty)*   | Editable multiline text. On `live_load=True` this widget is overwritten with the fetched positive prompt; on `live_load=False` its contents are passed straight through to the `positive` output. |
 | `negative_prompt`| `STRING`  | *(empty)*   | Editable multiline text. Same semantics as `positive_prompt` for the negative prompt.                                                                                                              |
 
