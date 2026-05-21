@@ -71,10 +71,11 @@ class MetascanLoadPrompt:
     FUNCTION = "load"
 
     def __init__(self) -> None:
-        # Per-node-instance cache of the last live-fetched payload.
-        # Holds image tensor + prompt strings + source path, but NOT
-        # width/height — those are always recomputed so the user can
-        # tweak ``quality`` without re-hitting metascan.
+        # Per-node-instance cache of the last live fetch. Holds image,
+        # name, and source_file_path — but NOT positive/negative (those
+        # live in the editable widgets and are persisted with the
+        # workflow JSON) and NOT width/height (always recomputed so
+        # the user can tweak ``quality`` without re-hitting metascan).
         self._cache: Optional[dict] = None
 
     @classmethod
@@ -95,6 +96,8 @@ class MetascanLoadPrompt:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**31 - 1}),
                 "quality": (QUALITY_TIERS,),
                 "live_load": ("BOOLEAN", {"default": True}),
+                "positive_prompt": ("STRING", {"multiline": True, "default": ""}),
+                "negative_prompt": ("STRING", {"multiline": True, "default": ""}),
             },
         }
 
@@ -107,27 +110,52 @@ class MetascanLoadPrompt:
         seed: int,
         quality: str,
         live_load: bool,
-    ) -> tuple:
+        positive_prompt: str,
+        negative_prompt: str,
+    ) -> dict:
         if live_load:
-            self._cache = self._fetch_live(
+            fetched = self._fetch_live(
                 folder=folder, target_model=target_model,
                 selection_mode=selection_mode, prompt_name=prompt_name,
                 seed=seed,
             )
-        elif self._cache is None:
-            raise RuntimeError(
-                "live_load is off but no cached prompt is available yet. "
-                "Enable live_load once to populate the cache, then disable."
-            )
+            # Cache only what can't be edited via widgets. Prompt text
+            # is the user's job from here on out (the JS extension
+            # writes the fetched values into the widgets immediately
+            # after this returns, so subsequent live_load=False runs
+            # read them back from there).
+            self._cache = {
+                "image": fetched["image"],
+                "name": fetched["name"],
+                "source_file_path": fetched["source_file_path"],
+            }
+            positive = fetched["positive"]
+            negative = fetched["negative"]
+            ui: dict = {
+                "positive_prompt": [positive],
+                "negative_prompt": [negative],
+            }
+        else:
+            if self._cache is None:
+                raise RuntimeError(
+                    "live_load is off but no cached prompt is available yet. "
+                    "Enable live_load once to populate the cache, then disable."
+                )
+            positive = positive_prompt
+            negative = negative_prompt
+            ui = {}
 
         c = self._cache
         src_h, src_w = c["image"].shape[1], c["image"].shape[2]
         width, height = compute_resolution(src_w, src_h, target_model, quality)
 
-        return (
-            c["image"], c["positive"], c["negative"], c["name"],
-            c["source_file_path"], width, height,
-        )
+        return {
+            "ui": ui,
+            "result": (
+                c["image"], positive, negative, c["name"],
+                c["source_file_path"], width, height,
+            ),
+        }
 
     def _fetch_live(
         self,
