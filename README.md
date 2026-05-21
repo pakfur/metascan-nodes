@@ -2,13 +2,14 @@
 
 ComfyUI custom nodes for the [metascan](https://github.com/pakfur/metascan) AI media browser.
 
-Three MVP nodes:
+Four nodes:
 
-- **Metascan · Save Image** — write a PNG batch into a metascan-watched directory. Metascan's filesystem watcher picks the file up on its own; no API call at save time.
-- **Metascan · Load From Folder** — load a random / sequential / specific image from a metascan manual folder, with the file's extracted positive + negative prompt as bonus outputs.
-- **Metascan · Load Prompt** — load a saved prompt from metascan's prompt library, scoped by manual folder and target model.
+- **[Metascan · Save Image](docs/nodes/save-image.md)** — write a PNG batch into a metascan-watched directory. Metascan's filesystem watcher picks the file up on its own; no API call at save time.
+- **[Metascan · Load From Folder](docs/nodes/load-from-folder.md)** — load a random / sequential / specific image from a metascan manual folder, with extracted prompts and a model-aware recommended `(width, height)` as bonus outputs.
+- **[Metascan · Load Prompt](docs/nodes/load-prompt.md)** — load a saved prompt from metascan's prompt library plus its source image and recommended resolution. Supports per-instance caching so you can sweep quality tiers without re-fetching.
+- **[Metascan · Settings](docs/nodes/settings.md)** — sentinel node for overriding URL / API key per workflow.
 
-Plus a **Metascan · Settings** sentinel node for overriding URL / API key per workflow.
+See the per-node docs above for inputs, outputs, errors, and the model-specific resolution rules.
 
 ## Install
 
