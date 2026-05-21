@@ -28,28 +28,30 @@ This node depends on the companion metascan endpoints `POST /api/prompt/search` 
 | `seed`           | `INT`     | `0`         | Selection seed for `random` mode. Same seed + same filter set always picks the same row.                                                             |
 | `quality`        | (enum)    | `Fast`      | `Fast` / `Balanced` / `High` / `Ultra`. See [resolution rules](load-from-folder.md#resolution-rules) — algorithm and per-tier pixel budgets are identical to Load From Folder. |
 | `live_load`      | `BOOLEAN` | `True`      | If `True`, fetch from metascan and refresh the cache. If `False`, reuse the cached image + prompt strings and only recompute `width` / `height`.     |
+| `positive_prompt`| `STRING`  | *(empty)*   | Editable multiline text. On `live_load=True` this widget is overwritten with the fetched positive prompt; on `live_load=False` its contents are passed straight through to the `positive` output. |
+| `negative_prompt`| `STRING`  | *(empty)*   | Editable multiline text. Same semantics as `positive_prompt` for the negative prompt.                                                                                                              |
 
 ### Caching semantics
 
-The node holds a per-instance cache containing the last-fetched `image`, `positive`, `negative`, `name`, and `source_file_path`. Width/height are deliberately **not** cached — they're recomputed every execute so changing `quality` or `target_model` updates the sizing without re-fetching.
+The node holds a per-instance cache containing the last-fetched `image`, `name`, and `source_file_path`. Prompt text is **not** cached — it lives in the editable `positive_prompt` / `negative_prompt` widgets and is persisted with the workflow JSON, so it survives a page reload. Width/height are also not cached — they're recomputed every execute so changing `quality` or `target_model` updates the sizing without re-fetching.
 
-| `live_load` | Cache state | Behavior                                                                 |
-|-------------|-------------|--------------------------------------------------------------------------|
-| `True`      | any         | Fetch from metascan, overwrite cache, compute resolution from new image. |
-| `False`     | populated   | Skip all HTTP. Reuse cached image + strings. Recompute resolution.       |
-| `False`     | empty       | Raise `RuntimeError("live_load is off but no cached prompt is available yet")`. |
+| `live_load` | Cache state | Output `positive`/`negative` | Behavior                                                                                       |
+|-------------|-------------|------------------------------|------------------------------------------------------------------------------------------------|
+| `True`      | any         | The fetched text             | Fetch from metascan, overwrite cache, push fetched text into the widgets, recompute resolution. |
+| `False`     | populated   | The widget contents          | Skip all HTTP. Reuse cached image + name + path. Recompute resolution.                          |
+| `False`     | empty       | —                            | Raise `RuntimeError("live_load is off but no cached prompt is available yet")`.                |
 
-Two LoadPrompt nodes in the same workflow have **independent caches** (the cache is on the node instance, not module-level). Cache survives across ComfyUI executions but resets if you reload the page or restart ComfyUI.
+Two LoadPrompt nodes in the same workflow have **independent caches** (the cache is on the node instance, not module-level). The image cache resets on page reload or ComfyUI restart, so after reopening a saved workflow you'll need at least one `live_load=True` run to repopulate it before you can iterate offline — even though the prompt text in the widgets persisted.
 
-Typical workflow: enable `live_load` for the first run to populate the cache, then disable it to sweep `Fast` → `Balanced` → `High` → `Ultra` cheaply.
+Typical workflow: enable `live_load` once, run, then disable it and edit the `positive_prompt` / `negative_prompt` widgets directly to iterate on the prompt cheaply. While iterating you can also sweep `quality` (Fast → Balanced → High → Ultra) without re-hitting metascan.
 
 ## Outputs
 
 | Name                | Type     | Description                                                                                                                                |
 |---------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------|
 | `image`             | `IMAGE`  | Source image the prompt was saved against. Tensor `[1, H, W, 3]`, float32, range `[0, 1]`. Decoded from metascan's stream bytes; RGBA → RGB. |
-| `positive`          | `STRING` | The saved positive prompt text. `prompt` field on the prompt row.                                                                          |
-| `negative`          | `STRING` | The saved negative prompt text. `negative` field on the row, with SQL `NULL` normalized to `""`.                                           |
+| `positive`          | `STRING` | The positive prompt text. Equal to the editable `positive_prompt` widget on `live_load=False`, or the fetched value (which simultaneously overwrites the widget) on `live_load=True`. |
+| `negative`          | `STRING` | The negative prompt text. Same semantics as `positive`. SQL `NULL` from the metascan row is normalized to `""` on fetch.                                                              |
 | `name`              | `STRING` | The saved-prompt's name (the unique-per-folder identifier shown in metascan's prompt library UI).                                          |
 | `source_file_path`  | `STRING` | Path of the media file the prompt was saved against (metascan's view of it — WSL/remote path if applicable).                               |
 | `width`             | `INT`    | Recommended generation width derived from the source image's dimensions, the chosen `target_model`, and `quality`.                         |
@@ -66,5 +68,5 @@ Typical workflow: enable `live_load` for the first run to populate the cache, th
 - **"no saved prompts match the folder + target_model filter"**: search returned zero rows. Loosen `target_model` (try `any`) or check the folder actually contains saved prompts in metascan.
 - **"no saved prompt named 'X' in the filtered set"**: `by_name` selection couldn't find the prompt. Names are case-sensitive exact-match. Check for trailing whitespace or rename mismatches.
 - **"saved prompt 'X' has no source file path"**: the prompt row was saved without a `file_path` (rare, only possible if metascan's saver ever wrote a NULL there). Re-save the prompt from metascan against an actual media file.
-- **"live_load is off but no cached prompt is available yet"**: you disabled `live_load` before ever running with it on. Enable once, run, then disable.
+- **"live_load is off but no cached prompt is available yet"**: you disabled `live_load` before ever running with it on. The widgets carry the prompt text but the *image* still has to come from a live fetch. Enable `live_load` once, run, then disable.
 - **"Metascan is offline"**: same fix as the other nodes — bring metascan up or set the URL via [Settings](settings.md). If you have a populated cache, you can flip `live_load` off and keep working offline.
