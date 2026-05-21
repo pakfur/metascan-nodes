@@ -87,7 +87,7 @@ def test_execute_maps_any_to_null_target_model(monkeypatch, base_url, folders_pa
     import mscan_nodes.settings
     mscan_nodes.settings._OVERRIDE = None
 
-    image, pos, neg, name, src, w, h = MetascanLoadPrompt().load(
+    out = MetascanLoadPrompt().load(
         folder="Portraits",
         target_model="any",
         selection_mode="by_name",
@@ -95,7 +95,10 @@ def test_execute_maps_any_to_null_target_model(monkeypatch, base_url, folders_pa
         seed=0,
         quality="Balanced",
         live_load=True,
+        positive_prompt="",
+        negative_prompt="",
     )
+    image, pos, neg, name, src, w, h = out["result"]
     assert pos == "p2"
     assert neg == "n2"
     assert name == "cinematic"
@@ -125,10 +128,12 @@ def test_execute_null_negative_becomes_empty_string(monkeypatch, base_url, folde
     import mscan_nodes.settings
     mscan_nodes.settings._OVERRIDE = None
 
-    _, _, neg, _, _, _, _ = MetascanLoadPrompt().load(
+    out = MetascanLoadPrompt().load(
         folder="Portraits", target_model="qwen", selection_mode="by_name",
         prompt_name="hero", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="",
     )
+    _, _, neg, _, _, _, _ = out["result"]
     assert neg == ""
 
 
@@ -137,6 +142,7 @@ def test_execute_raises_on_offline_sentinel():
         MetascanLoadPrompt().load(
             folder=OFFLINE_SENTINEL, target_model="qwen", selection_mode="random",
             prompt_name="", seed=0, quality="Balanced", live_load=True,
+            positive_prompt="", negative_prompt="",
         )
 
 
@@ -158,10 +164,12 @@ def test_execute_loads_source_image_and_emits_resolution(monkeypatch, base_url, 
     import mscan_nodes.settings
     mscan_nodes.settings._OVERRIDE = None
 
-    image, _, _, _, src, w, h = MetascanLoadPrompt().load(
+    out = MetascanLoadPrompt().load(
         folder="Portraits", target_model="qwen", selection_mode="by_name",
         prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="",
     )
+    image, _, _, _, src, w, h = out["result"]
     assert image.shape == (1, 1080, 1920, 3)
     assert src == "/b.png"
     assert (w, h) == (1664, 928)
@@ -186,6 +194,7 @@ def test_execute_raises_when_saved_prompt_has_no_file_path(monkeypatch, base_url
         MetascanLoadPrompt().load(
             folder="Portraits", target_model="qwen", selection_mode="by_name",
             prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
+            positive_prompt="", negative_prompt="",
         )
 
 
@@ -205,6 +214,7 @@ def test_live_load_off_with_empty_cache_raises(monkeypatch, base_url):
         MetascanLoadPrompt().load(
             folder="Portraits", target_model="qwen", selection_mode="random",
             prompt_name="", seed=0, quality="Balanced", live_load=False,
+            positive_prompt="", negative_prompt="",
         )
 
 
@@ -230,18 +240,22 @@ def test_cached_load_reuses_image_and_skips_http(monkeypatch, base_url, folders_
     node = MetascanLoadPrompt()
 
     # Warm cache with one live fetch.
-    img1, _, _, name1, src1, _, _ = node.load(
+    out1 = node.load(
         folder="Portraits", target_model="qwen", selection_mode="by_name",
         prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="",
     )
+    img1, _, _, name1, src1, _, _ = out1["result"]
     calls_after_live = (folders_route.call_count, search_route.call_count, stream_route.call_count)
     assert all(c >= 1 for c in calls_after_live)
 
     # Cached reuse — call counts must NOT advance.
-    img2, _, _, name2, src2, _, _ = node.load(
+    out2 = node.load(
         folder="Portraits", target_model="qwen", selection_mode="by_name",
         prompt_name="cinematic", seed=0, quality="Balanced", live_load=False,
+        positive_prompt="", negative_prompt="",
     )
+    img2, _, _, name2, src2, _, _ = out2["result"]
     assert (folders_route.call_count, search_route.call_count, stream_route.call_count) == calls_after_live
     assert img2 is img1   # identity reuse, not just equality
     assert name2 == name1
@@ -268,21 +282,27 @@ def test_cached_load_recomputes_resolution_on_quality_change(monkeypatch, base_u
 
     node = MetascanLoadPrompt()
     # Warm cache at Balanced.
-    _, _, _, _, _, w_balanced, h_balanced = node.load(
+    out_b = node.load(
         folder="Portraits", target_model="qwen", selection_mode="by_name",
         prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="",
     )
+    _, _, _, _, _, w_balanced, h_balanced = out_b["result"]
     stream_calls_after_warm = stream_route.call_count
 
     # Now sweep tiers with cache.
-    _, _, _, _, _, w_fast, h_fast = node.load(
+    out_f = node.load(
         folder="Portraits", target_model="qwen", selection_mode="by_name",
         prompt_name="cinematic", seed=0, quality="Fast", live_load=False,
+        positive_prompt="", negative_prompt="",
     )
-    _, _, _, _, _, w_ultra, h_ultra = node.load(
+    _, _, _, _, _, w_fast, h_fast = out_f["result"]
+    out_u = node.load(
         folder="Portraits", target_model="qwen", selection_mode="by_name",
         prompt_name="cinematic", seed=0, quality="Ultra", live_load=False,
+        positive_prompt="", negative_prompt="",
     )
+    _, _, _, _, _, w_ultra, h_ultra = out_u["result"]
 
     # No further stream fetches happened.
     assert stream_route.call_count == stream_calls_after_warm
