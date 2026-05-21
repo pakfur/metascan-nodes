@@ -87,8 +87,9 @@ def bytes_to_tensor(data: bytes) -> torch.Tensor:
 # --- ComfyUI node integration --------------------------------------------
 
 from mscan_client.api import MetascanClient
-from mscan_client.cache import combo_folders, OFFLINE_SENTINEL
+from mscan_client.cache import combo_folders, combo_target_models, OFFLINE_SENTINEL
 from mscan_client.config import resolve_config
+from mscan_nodes.resolution import QUALITY_TIERS, compute_resolution
 from mscan_nodes.settings import get_current_override
 
 
@@ -111,16 +112,21 @@ def _folder_id_for_name(client: MetascanClient, name: str) -> str:
 
 class MetascanLoadFromFolder:
     CATEGORY = "metascan"
-    RETURN_TYPES = ("IMAGE", "STRING", "STRING", "STRING", "INT")
-    RETURN_NAMES = ("image", "file_path", "positive", "negative", "next_seed")
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING", "STRING", "INT", "INT", "INT")
+    RETURN_NAMES = ("image", "file_path", "positive", "negative", "next_seed", "width", "height")
     FUNCTION = "load"
 
     @classmethod
     def INPUT_TYPES(cls) -> dict:
+        client = _build_client()
         try:
-            folders = combo_folders(_build_client())
+            folders = combo_folders(client)
         except Exception:  # noqa: BLE001
             folders = [OFFLINE_SENTINEL]
+        try:
+            models = combo_target_models(client)
+        except Exception:  # noqa: BLE001
+            models = [OFFLINE_SENTINEL]
         return {
             "required": {
                 "folder": (folders,),
@@ -129,6 +135,8 @@ class MetascanLoadFromFolder:
                 "index": ("INT", {"default": 0, "min": 0, "max": 2**31 - 1}),
                 "filename_filter": ("STRING", {"default": ""}),
                 "image_only": ("BOOLEAN", {"default": True}),
+                "target_model": (models,),
+                "quality": (QUALITY_TIERS,),
             },
         }
 
@@ -140,6 +148,8 @@ class MetascanLoadFromFolder:
         index: int,
         filename_filter: str,
         image_only: bool,
+        target_model: str,
+        quality: str,
     ) -> tuple:
         if folder == OFFLINE_SENTINEL:
             raise RuntimeError(
@@ -162,5 +172,7 @@ class MetascanLoadFromFolder:
 
         raw = client.stream_bytes(chosen)
         tensor = bytes_to_tensor(raw)
+        src_h, src_w = tensor.shape[1], tensor.shape[2]
+        width, height = compute_resolution(src_w, src_h, target_model, quality)
 
-        return (tensor, chosen, positive, negative, next_seed)
+        return (tensor, chosen, positive, negative, next_seed, width, height)

@@ -1,8 +1,9 @@
 """MetascanLoadPrompt — load a saved prompt from metascan's prompt library.
 
-Pure ``select_prompt`` helper + ComfyUI integration class. No image or
-tensor work — this node returns four strings (positive, negative, the
-chosen prompt's name, and the source media path it was saved against).
+Returns the prompt strings (positive, negative, name), the saved
+``source_file_path``, the source IMAGE tensor (fetched from metascan
+by file_path), and recommended (width, height) for image generation
+sized to the chosen target_model and quality tier.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from mscan_client.cache import (
     OFFLINE_SENTINEL,
 )
 from mscan_client.config import resolve_config
+from mscan_nodes.load_from_folder import bytes_to_tensor
+from mscan_nodes.resolution import QUALITY_TIERS, compute_resolution
 from mscan_nodes.settings import get_current_override
 
 
@@ -63,8 +66,8 @@ def _folder_id_for_name(client: MetascanClient, name: str) -> str:
 
 class MetascanLoadPrompt:
     CATEGORY = "metascan"
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
-    RETURN_NAMES = ("positive", "negative", "name", "source_file_path")
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING", "STRING", "STRING", "INT", "INT")
+    RETURN_NAMES = ("image", "positive", "negative", "name", "source_file_path", "width", "height")
     FUNCTION = "load"
 
     @classmethod
@@ -83,6 +86,7 @@ class MetascanLoadPrompt:
                 "selection_mode": (["random", "by_name"],),
                 "prompt_name": ("STRING", {"default": ""}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**31 - 1}),
+                "quality": (QUALITY_TIERS,),
             },
         }
 
@@ -93,6 +97,7 @@ class MetascanLoadPrompt:
         selection_mode: SelectionMode,
         prompt_name: str,
         seed: int,
+        quality: str,
     ) -> tuple:
         if folder == OFFLINE_SENTINEL or target_model == OFFLINE_SENTINEL:
             raise RuntimeError(
@@ -112,9 +117,24 @@ class MetascanLoadPrompt:
         )
         chosen = select_prompt(rows, mode=selection_mode, name=prompt_name, seed=seed)
 
+        source_file_path = chosen.get("file_path", "") or ""
+        if not source_file_path:
+            raise RuntimeError(
+                f"saved prompt {chosen.get('name', '?')!r} has no source "
+                "file path — cannot compute target resolution"
+            )
+
+        raw = client.stream_bytes(source_file_path)
+        image = bytes_to_tensor(raw)
+        src_h, src_w = image.shape[1], image.shape[2]
+        width, height = compute_resolution(src_w, src_h, target_model, quality)
+
         return (
+            image,
             chosen.get("prompt", "") or "",
             chosen.get("negative") or "",   # SQL NULL → ""
             chosen.get("name", "") or "",
-            chosen.get("file_path", "") or "",
+            source_file_path,
+            width,
+            height,
         )

@@ -165,19 +165,23 @@ def test_execute_loads_image_and_metadata(monkeypatch, base_url, folders_payload
     mscan_nodes.settings._OVERRIDE = None
 
     node = MetascanLoadFromFolder()
-    image, path, positive, negative, next_seed = node.load(
+    image, path, positive, negative, next_seed, width, height = node.load(
         folder="Portraits",
         selection_mode="sequential",
         seed=0,
         index=0,
         filename_filter="",
         image_only=True,
+        target_model="sd",
+        quality="Balanced",
     )
     assert image.shape == (1, 8, 8, 3)
     assert path == "/data/a/img1.png"
     assert positive == "POSITIVE"
     assert negative == "NEGATIVE"
     assert next_seed == 1
+    # 8x8 square source → SDXL Balanced 1024² at aspect 1:1, snap to 64.
+    assert (width, height) == (1024, 1024)
 
 
 @respx.mock
@@ -195,6 +199,7 @@ def test_execute_raises_on_empty_folder(monkeypatch, base_url, folders_payload):
         MetascanLoadFromFolder().load(
             folder="Landscapes", selection_mode="random", seed=0, index=0,
             filename_filter="", image_only=True,
+            target_model="sd", quality="Balanced",
         )
 
 
@@ -203,4 +208,37 @@ def test_execute_raises_on_offline_sentinel():
         MetascanLoadFromFolder().load(
             folder=OFFLINE_SENTINEL, selection_mode="random", seed=0, index=0,
             filename_filter="", image_only=True,
+            target_model="sd", quality="Balanced",
         )
+
+
+@respx.mock
+def test_execute_emits_resolution_for_landscape_qwen(monkeypatch, base_url, folders_payload):
+    """End-to-end check that target_model + quality drive the width/height
+    output. A 1920x1080 source under qwen+Balanced must pick the official
+    1664x928 bucket."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.get(f"{base_url}/api/folders/fld_a").mock(
+        return_value=httpx.Response(200, json=folders_payload[0])
+    )
+    respx.get(f"{base_url}/api/media/%2Fdata%2Fa%2Fimg1.png").mock(
+        return_value=httpx.Response(200, json={
+            "file_path": "/data/a/img1.png",
+            "data": {"prompt": "", "negative_prompt": ""},
+        })
+    )
+    respx.get(f"{base_url}/api/stream/%2Fdata%2Fa%2Fimg1.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes(size=(1920, 1080)))
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    _, _, _, _, _, w, h = MetascanLoadFromFolder().load(
+        folder="Portraits", selection_mode="sequential", seed=0, index=0,
+        filename_filter="", image_only=True,
+        target_model="qwen", quality="Balanced",
+    )
+    assert (w, h) == (1664, 928)
