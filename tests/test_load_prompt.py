@@ -433,6 +433,7 @@ def test_live_load_false_widget_values_independent_of_cache(monkeypatch, base_ur
     assert set(node._cache.keys()) == {"image", "name", "source_file_path"}
 
 
+@respx.mock
 def test_live_load_false_with_typed_text_still_requires_image_cache(monkeypatch, base_url):
     """Typing into the widgets doesn't bypass the image-cache requirement —
     we still need a cached image+source_file_path to output."""
@@ -441,7 +442,7 @@ def test_live_load_false_with_typed_text_still_requires_image_cache(monkeypatch,
     import mscan_nodes.settings
     mscan_nodes.settings._OVERRIDE = None
 
-    with pytest.raises(RuntimeError, match="no cached"):
+    with pytest.raises(RuntimeError, match="no cached prompt"):
         MetascanLoadPrompt().load(
             folder="Portraits", target_model="qwen", selection_mode="random",
             prompt_name="", seed=0, quality="Balanced", live_load=False,
