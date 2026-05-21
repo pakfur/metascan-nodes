@@ -221,7 +221,7 @@ def test_live_load_off_with_empty_cache_raises(monkeypatch, base_url):
 @respx.mock
 def test_cached_load_reuses_image_and_skips_http(monkeypatch, base_url, folders_payload):
     """After one live_load=True populating the cache, live_load=False
-    must reuse the cached image and prompt — no HTTP calls allowed."""
+    must reuse the cached image — no HTTP calls allowed."""
     clear_cache()
     folders_route = respx.get(f"{base_url}/api/folders").mock(
         return_value=httpx.Response(200, json=folders_payload)
