@@ -94,6 +94,7 @@ def test_execute_maps_any_to_null_target_model(monkeypatch, base_url, folders_pa
         prompt_name="cinematic",
         seed=0,
         quality="Balanced",
+        live_load=True,
     )
     assert pos == "p2"
     assert neg == "n2"
@@ -126,7 +127,7 @@ def test_execute_null_negative_becomes_empty_string(monkeypatch, base_url, folde
 
     _, _, neg, _, _, _, _ = MetascanLoadPrompt().load(
         folder="Portraits", target_model="qwen", selection_mode="by_name",
-        prompt_name="hero", seed=0, quality="Balanced",
+        prompt_name="hero", seed=0, quality="Balanced", live_load=True,
     )
     assert neg == ""
 
@@ -135,7 +136,7 @@ def test_execute_raises_on_offline_sentinel():
     with pytest.raises(RuntimeError, match="offline"):
         MetascanLoadPrompt().load(
             folder=OFFLINE_SENTINEL, target_model="qwen", selection_mode="random",
-            prompt_name="", seed=0, quality="Balanced",
+            prompt_name="", seed=0, quality="Balanced", live_load=True,
         )
 
 
@@ -159,7 +160,7 @@ def test_execute_loads_source_image_and_emits_resolution(monkeypatch, base_url, 
 
     image, _, _, _, src, w, h = MetascanLoadPrompt().load(
         folder="Portraits", target_model="qwen", selection_mode="by_name",
-        prompt_name="cinematic", seed=0, quality="Balanced",
+        prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
     )
     assert image.shape == (1, 1080, 1920, 3)
     assert src == "/b.png"
@@ -184,5 +185,110 @@ def test_execute_raises_when_saved_prompt_has_no_file_path(monkeypatch, base_url
     with pytest.raises(RuntimeError, match="no source file path"):
         MetascanLoadPrompt().load(
             folder="Portraits", target_model="qwen", selection_mode="by_name",
-            prompt_name="cinematic", seed=0, quality="Balanced",
+            prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
         )
+
+
+# ----- live_load toggle / per-instance cache -----
+
+@respx.mock
+def test_live_load_off_with_empty_cache_raises(monkeypatch, base_url):
+    """If the user disables live_load before ever doing a live fetch,
+    surface a clear error — don't silently succeed with garbage."""
+    clear_cache()
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    with pytest.raises(RuntimeError, match="no cached prompt"):
+        MetascanLoadPrompt().load(
+            folder="Portraits", target_model="qwen", selection_mode="random",
+            prompt_name="", seed=0, quality="Balanced", live_load=False,
+        )
+
+
+@respx.mock
+def test_cached_load_reuses_image_and_skips_http(monkeypatch, base_url, folders_payload):
+    """After one live_load=True populating the cache, live_load=False
+    must reuse the cached image and prompt — no HTTP calls allowed."""
+    clear_cache()
+    folders_route = respx.get(f"{base_url}/api/folders").mock(
+        return_value=httpx.Response(200, json=folders_payload)
+    )
+    search_route = respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": [SAMPLE_ROWS[1]]})
+    )
+    stream_route = respx.get(f"{base_url}/api/stream/%2Fb.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes(size=(16, 16), color=(7, 7, 7)))
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    node = MetascanLoadPrompt()
+
+    # Warm cache with one live fetch.
+    img1, _, _, name1, src1, _, _ = node.load(
+        folder="Portraits", target_model="qwen", selection_mode="by_name",
+        prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
+    )
+    calls_after_live = (folders_route.call_count, search_route.call_count, stream_route.call_count)
+    assert all(c >= 1 for c in calls_after_live)
+
+    # Cached reuse — call counts must NOT advance.
+    img2, _, _, name2, src2, _, _ = node.load(
+        folder="Portraits", target_model="qwen", selection_mode="by_name",
+        prompt_name="cinematic", seed=0, quality="Balanced", live_load=False,
+    )
+    assert (folders_route.call_count, search_route.call_count, stream_route.call_count) == calls_after_live
+    assert img2 is img1   # identity reuse, not just equality
+    assert name2 == name1
+    assert src2 == src1
+
+
+@respx.mock
+def test_cached_load_recomputes_resolution_on_quality_change(monkeypatch, base_url, folders_payload):
+    """The whole point of caching at this layer: user can sweep through
+    Fast / Balanced / High / Ultra without re-fetching anything, and
+    width/height should change each time."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": [SAMPLE_ROWS[1]]})
+    )
+    stream_route = respx.get(f"{base_url}/api/stream/%2Fb.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes(size=(1920, 1080)))
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    node = MetascanLoadPrompt()
+    # Warm cache at Balanced.
+    _, _, _, _, _, w_balanced, h_balanced = node.load(
+        folder="Portraits", target_model="qwen", selection_mode="by_name",
+        prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
+    )
+    stream_calls_after_warm = stream_route.call_count
+
+    # Now sweep tiers with cache.
+    _, _, _, _, _, w_fast, h_fast = node.load(
+        folder="Portraits", target_model="qwen", selection_mode="by_name",
+        prompt_name="cinematic", seed=0, quality="Fast", live_load=False,
+    )
+    _, _, _, _, _, w_ultra, h_ultra = node.load(
+        folder="Portraits", target_model="qwen", selection_mode="by_name",
+        prompt_name="cinematic", seed=0, quality="Ultra", live_load=False,
+    )
+
+    # No further stream fetches happened.
+    assert stream_route.call_count == stream_calls_after_warm
+    # Resolutions for 1920x1080 source under qwen:
+    assert (w_balanced, h_balanced) == (1664, 928)   # official bucket
+    assert (w_fast, h_fast) != (w_balanced, h_balanced)
+    assert (w_ultra, h_ultra) != (w_balanced, h_balanced)
+    # Ultra should produce more pixels than Fast.
+    assert w_ultra * h_ultra > w_fast * h_fast
