@@ -227,6 +227,23 @@ def test_execute_skips_workflow_chunk_when_embed_false(tmp_path):
     assert "workflow" not in img.info
 
 
+def test_execute_creates_subdirs_from_slash_in_filename_prefix(tmp_path):
+    """ComfyUI core SaveImage treats `subdir/prefix` as 'put files in
+    subdir/, named prefix_NNNNN.png'. Match that behavior — the user
+    might pass 'test/qwen' as filename_prefix and expect test/ to be
+    created under target_dir."""
+    images = torch.zeros((1, 8, 8, 3), dtype=torch.float32)
+    out_images, out_path = MetascanSaveImage().save(
+        images=images, directory=str(tmp_path), subpath="",
+        filename_prefix="sub1/sub2/qwen", embed_workflow=False,
+        prompt=None, extra_pnginfo=None,
+    )
+    p = Path(out_path)
+    assert p.exists()
+    assert p.parent == tmp_path / "sub1" / "sub2"
+    assert p.name == "qwen_00000.png"
+
+
 def test_execute_does_not_overwrite_when_gap_in_sequence(tmp_path):
     """If files 00000 and 00002 exist (gap from a deletion at 00001),
     the next save must write 00003 — not re-use 00002 via len() count."""

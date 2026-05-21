@@ -13,7 +13,7 @@ import datetime as dt
 import json
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 import numpy as np
@@ -164,11 +164,21 @@ class MetascanSaveImage:
 
         info = build_png_info(prompt=prompt, workflow=workflow_dict)
 
+        # filename_prefix may contain forward slashes (e.g. "subfolder/run")
+        # which ComfyUI core SaveImage treats as additional subdirectory
+        # under target_dir. Split off the subdir part and ensure it exists.
+        prefix_path = PurePosixPath(filename_prefix)
+        prefix_subdir = str(prefix_path.parent) if prefix_path.parent != PurePosixPath(".") else ""
+        prefix_name = prefix_path.name
+        if prefix_subdir:
+            target_dir = target_dir / prefix_subdir
+            target_dir.mkdir(parents=True, exist_ok=True)
+
         # Collision-counter filename: ``<prefix>_<NNNNN>.png`` starting
         # at one past the highest existing index. We pick max+1 rather
         # than len(existing) so a deletion-induced gap doesn't cause us
         # to overwrite a surviving file.
-        existing = list(target_dir.glob(f"{filename_prefix}_*.png"))
+        existing = list(target_dir.glob(f"{prefix_name}_*.png"))
         max_idx = -1
         for p in existing:
             try:
@@ -182,7 +192,7 @@ class MetascanSaveImage:
         first_path: Optional[Path] = None
         for i in range(images.shape[0]):
             pil = tensor_to_pil(images[i])
-            out_path = target_dir / f"{filename_prefix}_{next_idx + i:05d}.png"
+            out_path = target_dir / f"{prefix_name}_{next_idx + i:05d}.png"
             pil.save(out_path, pnginfo=info)
             if first_path is None:
                 first_path = out_path
