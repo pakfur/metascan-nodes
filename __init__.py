@@ -30,6 +30,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MetascanLoadPrompt": "Metascan · Load Prompt",
 }
 
-WEB_DIRECTORY = None
+WEB_DIRECTORY = "./web"
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
