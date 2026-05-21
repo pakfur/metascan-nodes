@@ -292,3 +292,158 @@ def test_cached_load_recomputes_resolution_on_quality_change(monkeypatch, base_u
     assert (w_ultra, h_ultra) != (w_balanced, h_balanced)
     # Ultra should produce more pixels than Fast.
     assert w_ultra * h_ultra > w_fast * h_fast
+
+
+@respx.mock
+def test_live_load_true_returns_ui_dict_with_fetched_text(monkeypatch, base_url, folders_payload):
+    """live_load=True must return a dict-shaped result whose ui carries
+    the fetched positive/negative text — that's what the JS extension
+    reads to populate the widgets."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": [SAMPLE_ROWS[1]]})  # p2 / n2
+    )
+    respx.get(f"{base_url}/api/stream/%2Fb.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes())
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    out = MetascanLoadPrompt().load(
+        folder="Portraits", target_model="qwen", selection_mode="by_name",
+        prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="",
+    )
+
+    assert isinstance(out, dict)
+    assert out["ui"] == {"positive_prompt": ["p2"], "negative_prompt": ["n2"]}
+    image, pos, neg, name, src, w, h = out["result"]
+    assert (pos, neg, name, src) == ("p2", "n2", "cinematic", "/b.png")
+
+
+@respx.mock
+def test_live_load_true_overrides_widget_values(monkeypatch, base_url, folders_payload):
+    """live_load=True ignores whatever the user typed into the widgets —
+    the fetch is the source of truth on a refresh."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": [SAMPLE_ROWS[1]]})  # p2 / n2
+    )
+    respx.get(f"{base_url}/api/stream/%2Fb.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes())
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    out = MetascanLoadPrompt().load(
+        folder="Portraits", target_model="qwen", selection_mode="by_name",
+        prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="USER EDIT — IGNORE ME",
+        negative_prompt="USER EDIT — IGNORE ME TOO",
+    )
+
+    _, pos, neg, _, _, _, _ = out["result"]
+    assert pos == "p2"
+    assert neg == "n2"
+    assert out["ui"]["positive_prompt"] == ["p2"]
+    assert out["ui"]["negative_prompt"] == ["n2"]
+
+
+@respx.mock
+def test_live_load_false_echoes_widget_values(monkeypatch, base_url, folders_payload):
+    """live_load=False outputs whatever the widget contains, not the
+    cached fetched text — the widget IS the source of truth."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": [SAMPLE_ROWS[1]]})  # p2 / n2
+    )
+    respx.get(f"{base_url}/api/stream/%2Fb.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes())
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    node = MetascanLoadPrompt()
+    # Warm cache.
+    node.load(
+        folder="Portraits", target_model="qwen", selection_mode="by_name",
+        prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="",
+    )
+
+    # Now iterate.
+    out = node.load(
+        folder="Portraits", target_model="qwen", selection_mode="by_name",
+        prompt_name="cinematic", seed=0, quality="Balanced", live_load=False,
+        positive_prompt="my edited positive",
+        negative_prompt="my edited negative",
+    )
+    _, pos, neg, _, _, _, _ = out["result"]
+    assert pos == "my edited positive"
+    assert neg == "my edited negative"
+    # No widget push on live_load=False — the widget is already the source.
+    assert out["ui"] == {}
+
+
+@respx.mock
+def test_live_load_false_widget_values_independent_of_cache(monkeypatch, base_url, folders_payload):
+    """After a warm fetch of p2/n2, a live_load=False call with empty
+    widget strings must output empty strings — confirming the cache no
+    longer carries prompt text."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": [SAMPLE_ROWS[1]]})  # p2 / n2
+    )
+    respx.get(f"{base_url}/api/stream/%2Fb.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes())
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    node = MetascanLoadPrompt()
+    node.load(
+        folder="Portraits", target_model="qwen", selection_mode="by_name",
+        prompt_name="cinematic", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="",
+    )
+
+    out = node.load(
+        folder="Portraits", target_model="qwen", selection_mode="by_name",
+        prompt_name="cinematic", seed=0, quality="Balanced", live_load=False,
+        positive_prompt="", negative_prompt="",
+    )
+    _, pos, neg, _, _, _, _ = out["result"]
+    assert pos == ""
+    assert neg == ""
+    # And the cache should not carry positive/negative keys.
+    assert "positive" not in node._cache
+    assert "negative" not in node._cache
+    assert set(node._cache.keys()) == {"image", "name", "source_file_path"}
+
+
+def test_live_load_false_with_typed_text_still_requires_image_cache(monkeypatch, base_url):
+    """Typing into the widgets doesn't bypass the image-cache requirement —
+    we still need a cached image+source_file_path to output."""
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    with pytest.raises(RuntimeError, match="no cached"):
+        MetascanLoadPrompt().load(
+            folder="Portraits", target_model="qwen", selection_mode="random",
+            prompt_name="", seed=0, quality="Balanced", live_load=False,
+            positive_prompt="text from user", negative_prompt="more text",
+        )
