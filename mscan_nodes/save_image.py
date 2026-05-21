@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -20,13 +22,33 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 
+_WSL_MNT_RE = re.compile(r"^/mnt/([a-zA-Z])(/.*)?$")
+
+
+def wsl_to_native_path(path: str) -> str:
+    """Translate WSL ``/mnt/<drive>/...`` paths to Windows ``<DRIVE>:\\...``
+    when running on Windows. No-op on Linux/macOS and for paths that
+    aren't WSL-style mounts. Needed when metascan runs in WSL (and
+    therefore reports watched directories as ``/mnt/d/...``) but the
+    ComfyUI process consuming those paths is on the Windows side."""
+    if sys.platform != "win32":
+        return path
+    m = _WSL_MNT_RE.match(path)
+    if not m:
+        return path
+    drive = m.group(1).upper()
+    rest = m.group(2) or "\\"
+    return f"{drive}:{rest}".replace("/", "\\")
+
+
 def resolve_target_dir(directory: str, subpath: str, now: dt.datetime) -> Path:
     """Return ``Path(directory) / strftime(subpath, now)``, creating the
     directory tree if it doesn't exist. ``subpath`` may include strftime
     placeholders like ``%Y-%m``; an empty subpath returns ``directory``
-    unchanged. Always uses POSIX-style joining via pathlib so Windows
-    paths work transparently."""
-    base = Path(directory)
+    unchanged. WSL-style mounts (``/mnt/<drive>/...``) are translated to
+    native Windows form first so ComfyUI on Windows can write to dirs
+    that metascan-in-WSL reports."""
+    base = Path(wsl_to_native_path(directory))
     if subpath:
         expanded = now.strftime(subpath)
         target = base / expanded

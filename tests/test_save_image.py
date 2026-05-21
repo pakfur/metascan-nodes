@@ -12,6 +12,7 @@ from mscan_nodes.save_image import (
     resolve_target_dir,
     tensor_to_pil,
     build_png_info,
+    wsl_to_native_path,
 )
 
 
@@ -37,6 +38,42 @@ def test_resolve_target_dir_creates_dirs(tmp_path):
 def test_resolve_target_dir_empty_subpath_returns_directory(tmp_path):
     out = resolve_target_dir(directory=str(tmp_path), subpath="", now=dt.datetime(2026, 5, 18))
     assert out == tmp_path
+
+
+# ----- wsl_to_native_path -----
+
+def test_wsl_to_native_passthrough_on_non_windows(monkeypatch):
+    monkeypatch.setattr("sys.platform", "linux")
+    assert wsl_to_native_path("/mnt/d/foo") == "/mnt/d/foo"
+    assert wsl_to_native_path("/data/bar") == "/data/bar"
+
+
+def test_wsl_to_native_translates_on_windows(monkeypatch):
+    monkeypatch.setattr("sys.platform", "win32")
+    assert wsl_to_native_path("/mnt/d/Media/Staging") == "D:\\Media\\Staging"
+    assert wsl_to_native_path("/mnt/c/Users/jk") == "C:\\Users\\jk"
+
+
+def test_wsl_to_native_uppercases_drive_letter(monkeypatch):
+    monkeypatch.setattr("sys.platform", "win32")
+    assert wsl_to_native_path("/mnt/e/x") == "E:\\x"
+
+
+def test_wsl_to_native_leaves_native_windows_path_alone(monkeypatch):
+    monkeypatch.setattr("sys.platform", "win32")
+    assert wsl_to_native_path("D:\\Media\\Staging") == "D:\\Media\\Staging"
+
+
+def test_wsl_to_native_leaves_unrelated_posix_path_alone(monkeypatch):
+    monkeypatch.setattr("sys.platform", "win32")
+    # /data/foo isn't a /mnt/<drive>/... pattern; leave it to fail loudly
+    # rather than guess a drive letter.
+    assert wsl_to_native_path("/data/foo") == "/data/foo"
+
+
+def test_wsl_to_native_handles_mnt_root(monkeypatch):
+    monkeypatch.setattr("sys.platform", "win32")
+    assert wsl_to_native_path("/mnt/d") == "D:\\"
 
 
 # ----- tensor_to_pil -----
