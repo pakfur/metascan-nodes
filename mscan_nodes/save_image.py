@@ -101,6 +101,47 @@ def _build_client() -> MetascanClient:
     return MetascanClient(config=cfg, timeout=5.0)
 
 
+def _comfy_temp_dir() -> Optional[Path]:
+    """Return ComfyUI's temp directory, or None if we're not running under
+    ComfyUI (tests, scripts). The preview-image side of save() is skipped
+    when this is None."""
+    try:
+        import folder_paths  # ComfyUI puts its root on sys.path
+        return Path(folder_paths.get_temp_directory())
+    except Exception:  # noqa: BLE001 — any failure means no UI preview
+        return None
+
+
+def _write_previews(
+    images: "torch.Tensor",
+    prefix_name: str,
+    next_idx: int,
+    temp_dir: Path,
+) -> list[dict]:
+    """Save lightweight preview copies into ComfyUI's temp dir and return
+    the ``ui.images`` payload (filename/subfolder/type tuples) that the
+    frontend uses to render thumbnails via the ``/view`` endpoint.
+
+    Previews use ``compress_level=1`` to match ComfyUI's PreviewImage
+    node — fast write, slightly larger files; not the canonical save."""
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    results: list[dict] = []
+    for i in range(images.shape[0]):
+        pil = tensor_to_pil(images[i])
+        # Prefix with ``metascan_`` so we don't collide with files from
+        # other nodes (PreviewImage uses random suffixes; we use the
+        # node-name namespace instead — collisions across runs are
+        # harmless since temp dir is wiped on ComfyUI restart).
+        preview_name = f"metascan_{prefix_name}_{next_idx + i:05d}.png"
+        pil.save(temp_dir / preview_name, compress_level=1)
+        results.append({
+            "filename": preview_name,
+            "subfolder": "",
+            "type": "temp",
+        })
+    return results
+
+
 class MetascanSaveImage:
     """Save a batch of images into a metascan-watched directory.
 
@@ -197,4 +238,16 @@ class MetascanSaveImage:
             if first_path is None:
                 first_path = out_path
 
-        return (images, str(first_path) if first_path else "")
+        # Write previews into ComfyUI's temp dir so the node renders
+        # thumbnails in the UI (matches core SaveImage's behavior). When
+        # ComfyUI's folder_paths isn't importable — tests, scripts —
+        # skip the preview write and return an empty ui.images list.
+        ui_images: list[dict] = []
+        temp_dir = _comfy_temp_dir()
+        if temp_dir is not None:
+            ui_images = _write_previews(images, prefix_name, next_idx, temp_dir)
+
+        return {
+            "ui": {"images": ui_images},
+            "result": (images, str(first_path) if first_path else ""),
+        }

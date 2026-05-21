@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import sys
 from pathlib import Path
 
 import pytest
@@ -175,7 +176,7 @@ def test_input_types_shows_offline_sentinel_when_server_down(monkeypatch, base_u
 def test_execute_writes_png_and_passes_through_tensor(tmp_path):
     images = torch.zeros((2, 16, 16, 3), dtype=torch.float32)
     node = MetascanSaveImage()
-    out_images, out_path = node.save(
+    ret = node.save(
         images=images,
         directory=str(tmp_path),
         subpath="",
@@ -184,6 +185,7 @@ def test_execute_writes_png_and_passes_through_tensor(tmp_path):
         prompt=None,
         extra_pnginfo=None,
     )
+    out_images, out_path = ret["result"]
     assert out_images is images  # identity pass-through
     p = Path(out_path)
     assert p.exists() and p.suffix == ".png"
@@ -233,15 +235,73 @@ def test_execute_creates_subdirs_from_slash_in_filename_prefix(tmp_path):
     might pass 'test/qwen' as filename_prefix and expect test/ to be
     created under target_dir."""
     images = torch.zeros((1, 8, 8, 3), dtype=torch.float32)
-    out_images, out_path = MetascanSaveImage().save(
+    ret = MetascanSaveImage().save(
         images=images, directory=str(tmp_path), subpath="",
         filename_prefix="sub1/sub2/qwen", embed_workflow=False,
         prompt=None, extra_pnginfo=None,
     )
+    _, out_path = ret["result"]
     p = Path(out_path)
     assert p.exists()
     assert p.parent == tmp_path / "sub1" / "sub2"
     assert p.name == "qwen_00000.png"
+
+
+def test_execute_returns_dict_with_ui_and_result_keys(tmp_path):
+    """OUTPUT_NODE return shape must be {ui: ..., result: tuple} so
+    ComfyUI's executor knows where the actual node outputs are vs
+    what to render in the UI panel."""
+    images = torch.zeros((1, 8, 8, 3), dtype=torch.float32)
+    ret = MetascanSaveImage().save(
+        images=images, directory=str(tmp_path), subpath="",
+        filename_prefix="ComfyUI", embed_workflow=False, prompt=None,
+        extra_pnginfo=None,
+    )
+    assert isinstance(ret, dict)
+    assert "ui" in ret and "result" in ret
+    assert "images" in ret["ui"]
+    assert isinstance(ret["result"], tuple) and len(ret["result"]) == 2
+
+
+def test_execute_ui_images_empty_when_no_comfy_folder_paths(tmp_path):
+    """When ComfyUI's folder_paths module isn't importable (tests,
+    scripts), the preview write is skipped and ui.images is []. The
+    canonical save into the metascan dir still happens."""
+    images = torch.zeros((2, 8, 8, 3), dtype=torch.float32)
+    ret = MetascanSaveImage().save(
+        images=images, directory=str(tmp_path), subpath="",
+        filename_prefix="ComfyUI", embed_workflow=False, prompt=None,
+        extra_pnginfo=None,
+    )
+    # No folder_paths in test env, so preview save skipped.
+    assert ret["ui"]["images"] == []
+    # Canonical saves still landed.
+    assert len(list(tmp_path.glob("ComfyUI_*.png"))) == 2
+
+
+def test_execute_writes_previews_when_folder_paths_available(tmp_path, monkeypatch):
+    """When folder_paths.get_temp_directory() returns a usable path,
+    save() also writes preview PNGs there and returns one ui.images
+    entry per input batch image."""
+    preview_dir = tmp_path / "comfy_temp"
+    fake_module = type(sys)("folder_paths")
+    fake_module.get_temp_directory = lambda: str(preview_dir)
+    monkeypatch.setitem(sys.modules, "folder_paths", fake_module)
+
+    save_dir = tmp_path / "save"
+    save_dir.mkdir()
+    images = torch.zeros((2, 8, 8, 3), dtype=torch.float32)
+    ret = MetascanSaveImage().save(
+        images=images, directory=str(save_dir), subpath="",
+        filename_prefix="ComfyUI", embed_workflow=False, prompt=None,
+        extra_pnginfo=None,
+    )
+    assert len(ret["ui"]["images"]) == 2
+    for entry in ret["ui"]["images"]:
+        assert entry["type"] == "temp"
+        assert entry["subfolder"] == ""
+        assert entry["filename"].startswith("metascan_ComfyUI_")
+        assert (preview_dir / entry["filename"]).exists()
 
 
 def test_execute_does_not_overwrite_when_gap_in_sequence(tmp_path):
