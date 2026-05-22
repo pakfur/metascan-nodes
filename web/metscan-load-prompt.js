@@ -4,6 +4,34 @@ import { api } from "/scripts/api.js";
 const NODE_CLASS = "MetascanLoadPrompt";
 
 // ---------------------------------------------------------------------------
+// Widget visibility toggle
+//
+// ComfyUI/LiteGraph treats type === "converted-widget" as drawn-but-zero-
+// height; pair it with a computeSize returning [0, -4] to fully collapse
+// the row (the -4 cancels LiteGraph's default per-widget padding).
+// ---------------------------------------------------------------------------
+
+const HIDDEN_TYPE = "converted-widget";
+const HIDDEN_SIZE = () => [0, -4];
+
+function setHidden(widget, hidden) {
+    if (!widget) return;
+    if (hidden) {
+        if (widget.type === HIDDEN_TYPE) return;
+        widget._origType = widget.type;
+        widget._origComputeSize = widget.computeSize;
+        widget.type = HIDDEN_TYPE;
+        widget.computeSize = HIDDEN_SIZE;
+    } else {
+        if (widget.type !== HIDDEN_TYPE) return;
+        widget.type = widget._origType;
+        widget.computeSize = widget._origComputeSize;
+        widget._origType = undefined;
+        widget._origComputeSize = undefined;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Thumbnail picker overlay
 //
 // Single-instance overlay rendered as an absolutely-positioned <div> on
@@ -25,7 +53,7 @@ function closePicker() {
     activePicker = null;
 }
 
-function openPicker(node) {
+function openPicker(node, onPicked) {
     closePicker();
 
     const folder = node.widgets?.find((w) => w.name === "folder")?.value || "";
@@ -134,7 +162,7 @@ function openPicker(node) {
                 return;
             }
             for (const row of prompts) {
-                list.appendChild(buildRow(row, promptNameWidget, node));
+                list.appendChild(buildRow(row, promptNameWidget, node, onPicked));
             }
         })
         .catch((err) => {
@@ -146,7 +174,7 @@ function openPicker(node) {
         });
 }
 
-function buildRow(row, promptNameWidget, node) {
+function buildRow(row, promptNameWidget, node, onPicked) {
     const item = document.createElement("div");
     Object.assign(item.style, {
         display: "flex",
@@ -169,6 +197,7 @@ function buildRow(row, promptNameWidget, node) {
         }
         node.setDirtyCanvas?.(true, true);
         closePicker();
+        onPicked?.(row);
     });
 
     const img = document.createElement("img");
@@ -230,15 +259,56 @@ app.registerExtension({
     async nodeCreated(node) {
         if (node.comfyClass !== NODE_CLASS) return;
 
-        // Add a picker-launch button. Always present (not gated to
-        // select mode) because it's also useful as a "fill prompt_name
-        // from a visual list" shortcut for by_name workflows.
-        node.addWidget(
+        const promptNameWidget = node.widgets?.find((w) => w.name === "prompt_name");
+        const selectionModeWidget = node.widgets?.find((w) => w.name === "selection_mode");
+
+        // The "select" mode replaces the prompt_name text input with
+        // this button (clicking opens the thumbnail overlay). When the
+        // mode is anything else, this button hides and the stock
+        // prompt_name text widget comes back.
+        const pickWidget = node.addWidget(
             "button",
             "🖼 Pick prompt…",
             null,
-            () => openPicker(node),
+            () => openPicker(node, () => updateForMode()),
             { serialize: false },
         );
+
+        function updateForMode() {
+            const isSelect = selectionModeWidget?.value === "select";
+            setHidden(promptNameWidget, isSelect);
+            setHidden(pickWidget, !isSelect);
+            if (isSelect) {
+                const cur = promptNameWidget?.value || "";
+                pickWidget.name = cur ? `🖼 ${cur}` : "🖼 Pick prompt…";
+            }
+            // Recompute node height around the new widget layout so
+            // the face shrinks/grows to fit.
+            const newSize = node.computeSize?.();
+            if (newSize) node.setSize?.(newSize);
+            node.setDirtyCanvas?.(true, true);
+        }
+
+        if (selectionModeWidget) {
+            const origCb = selectionModeWidget.callback;
+            selectionModeWidget.callback = function (value, ...rest) {
+                const ret = origCb?.call(this, value, ...rest);
+                updateForMode();
+                return ret;
+            };
+        }
+
+        // Saved workflows: widget values are restored *after* nodeCreated
+        // fires, via onConfigure. Re-run there so the layout matches the
+        // restored selection_mode.
+        const origOnConfigure = node.onConfigure;
+        node.onConfigure = function (...args) {
+            const ret = origOnConfigure?.apply(this, args);
+            updateForMode();
+            return ret;
+        };
+
+        // Initial layout — defer so widget defaults settle first.
+        setTimeout(updateForMode, 0);
     },
 });

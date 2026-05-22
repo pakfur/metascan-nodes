@@ -38,10 +38,10 @@ This node depends on the companion metascan endpoints `POST /api/prompt/search` 
 |-------------|-------------------------------------------------------------------------------------------|------------------|
 | `random`    | `rows[seed % len(rows)]` — deterministic per seed.                                        | `seed`           |
 | `by_name`   | The row whose `name` matches `prompt_name`. Case-sensitive exact match.                   | `prompt_name`    |
-| `select`    | Same as `by_name`, but the 🖼 **Pick prompt** button opens a thumbnail picker overlay that writes the chosen name back into `prompt_name`. Pick visually instead of typing. | `prompt_name` (set via picker) |
+| `select`    | Same as `by_name`, but the `prompt_name` text widget is replaced by a 🖼 **Pick prompt** button that opens a thumbnail picker overlay. Clicking a row writes the chosen name into the same underlying `prompt_name` state. Pick visually instead of typing. | `prompt_name` (set via picker) |
 | `increment` | `rows[index-1]` (1-based). After execute, `index` advances by 1 and wraps to 1 past the last row. Lets you step through a folder in order across runs. | `index`          |
 
-The picker overlay (`select` mode and also usable as a shortcut in any mode) hits two ComfyUI-side proxy routes that this package registers — `GET /metscan/prompts` and `GET /metscan/thumbnail/<file_path>` — which then call metascan. Browsers never talk to metascan directly; the picker only works when ComfyUI itself can reach the metascan instance. If metascan is unreachable when you open the picker, the overlay shows an offline message rather than failing the workflow.
+The picker overlay (visible only in `select` mode) hits two ComfyUI-side proxy routes that this package registers — `GET /metscan/prompts` and `GET /metscan/thumbnail/<file_path>` — which then call metascan. Browsers never talk to metascan directly; the picker only works when ComfyUI itself can reach the metascan instance. If metascan is unreachable when you open the picker, the overlay shows an offline message rather than failing the workflow.
 
 ### Caching semantics
 

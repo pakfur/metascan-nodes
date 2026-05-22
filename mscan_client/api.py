@@ -115,9 +115,15 @@ class MetascanClient:
         """Return the cached JPEG thumbnail bytes for ``file_path``.
         Used by the ComfyUI server-route proxy that powers the
         thumbnail-picker UI on Load Prompt — full source image bytes
-        would be wasteful for a 96px-row list."""
+        would be wasteful for a 96px-row list.
+
+        Endpoint is ``/api/thumbnails/<file_path>`` (NOT
+        ``/api/media/thumbnails/...``). The media router uses
+        ``prefix="/api"`` on its APIRouter, and the route inside is
+        ``/thumbnails/{file_path:path}`` — matching how metascan's
+        own frontend builds the URL via ``${API_BASE}/thumbnails/...``."""
         try:
-            r = self._http.get(f"/api/media/thumbnails/{self._encode_path(file_path)}")
+            r = self._http.get(f"/api/thumbnails/{self._encode_path(file_path)}")
         except httpx.TimeoutException as e:
             raise OfflineError(reason=f"timeout: {e}") from e
         except httpx.TransportError as e:

@@ -116,7 +116,7 @@ def test_fetch_thumbnail_proxies_metascan_endpoint(monkeypatch, base_url):
     returns the JPEG bytes unchanged."""
     clear_cache()
     payload = _jpeg_bytes()
-    respx.get(f"{base_url}/api/media/thumbnails/%2Fb.png").mock(
+    respx.get(f"{base_url}/api/thumbnails/%2Fb.png").mock(
         return_value=httpx.Response(200, content=payload, headers={"Content-Type": "image/jpeg"})
     )
     monkeypatch.setenv("METASCAN_URL", base_url)
@@ -132,7 +132,7 @@ def test_fetch_thumbnail_404_raises_api_error(monkeypatch, base_url):
     """Metascan returns 404 → ApiError with the status preserved so the
     aiohttp shim can re-emit it to the browser."""
     clear_cache()
-    respx.get(f"{base_url}/api/media/thumbnails/%2Fmissing.png").mock(
+    respx.get(f"{base_url}/api/thumbnails/%2Fmissing.png").mock(
         return_value=httpx.Response(404, text="not found")
     )
     monkeypatch.setenv("METASCAN_URL", base_url)
