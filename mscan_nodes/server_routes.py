@@ -100,9 +100,14 @@ async def _handle_list_prompts(request):
 async def _handle_thumbnail(request):
     from aiohttp import web
 
-    file_path = request.match_info.get("file_path", "")
+    # Query-string param rather than a path variable: file paths
+    # contain forward slashes, and aiohttp's path-variable regex
+    # handling of percent-encoded slashes ("%2F") is inconsistent
+    # across versions — routing silently 404s before the handler
+    # even fires. A query string sidesteps all that.
+    file_path = request.rel_url.query.get("file_path", "")
     if not file_path:
-        return web.Response(status=400, text="file_path required")
+        return web.Response(status=400, text="file_path query param required")
     try:
         data = await asyncio.to_thread(fetch_thumbnail_bytes, file_path)
     except OfflineError as e:
@@ -128,7 +133,7 @@ def _register() -> bool:
         return False
     routes = instance.routes
     routes.get("/metscan/prompts")(_handle_list_prompts)
-    routes.get("/metscan/thumbnail/{file_path:.+}")(_handle_thumbnail)
+    routes.get("/metscan/thumbnail")(_handle_thumbnail)
     return True
 
 

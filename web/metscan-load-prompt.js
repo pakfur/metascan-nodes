@@ -210,7 +210,9 @@ function buildRow(row, promptNameWidget, node, onPicked) {
         borderRadius: "3px",
     });
     img.loading = "lazy";
-    img.src = `/metscan/thumbnail/${encodeURIComponent(row.file_path)}`;
+    // Query-string rather than path variable — aiohttp's path-var
+    // routing chokes on percent-encoded slashes in some versions.
+    img.src = `/metscan/thumbnail?file_path=${encodeURIComponent(row.file_path)}`;
     img.onerror = () => {
         img.style.opacity = "0.3";
     };
