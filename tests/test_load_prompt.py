@@ -470,44 +470,6 @@ def test_live_load_false_with_typed_text_still_requires_image_cache(monkeypatch,
         )
 
 
-# ----- select mode -----
-
-def test_select_prompt_select_mode_returns_matching_row():
-    row = select_prompt(SAMPLE_ROWS, mode="select", name="landscape", seed=0)
-    assert row["id"] == 3
-
-
-def test_select_prompt_select_mode_missing_raises():
-    with pytest.raises(RuntimeError, match="no saved prompt"):
-        select_prompt(SAMPLE_ROWS, mode="select", name="missing", seed=0)
-
-
-@respx.mock
-def test_execute_select_mode_behaves_like_by_name(monkeypatch, base_url, folders_payload):
-    """``select`` mode shares the name-lookup path with ``by_name`` —
-    the only difference is how the frontend collected the name."""
-    clear_cache()
-    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
-    respx.post(f"{base_url}/api/prompt/search").mock(
-        return_value=httpx.Response(200, json={"prompts": SAMPLE_ROWS})
-    )
-    respx.get(f"{base_url}/api/stream/%2Fc.png").mock(
-        return_value=httpx.Response(200, content=_png_bytes())
-    )
-    monkeypatch.setenv("METASCAN_URL", base_url)
-    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
-    import mscan_nodes.settings
-    mscan_nodes.settings._OVERRIDE = None
-
-    out = MetascanLoadPrompt().load(
-        folder="Portraits", target_model="qwen", selection_mode="select",
-        prompt_name="landscape", seed=0, quality="Balanced", live_load=True,
-        positive_prompt="", negative_prompt="",
-    )
-    _, pos, _, name, src, _, _ = out["result"]
-    assert (pos, name, src) == ("p3", "landscape", "/c.png")
-
-
 # ----- increment mode -----
 
 @respx.mock
@@ -660,9 +622,10 @@ def test_execute_increment_single_row_wraps_to_self(monkeypatch, base_url, folde
     assert out["ui"]["index"] == [1]
 
 
-def test_input_types_contains_new_modes_and_index_widget(monkeypatch, base_url):
-    """The combo lists all four modes and there's an ``index`` widget
-    with sensible defaults."""
+def test_input_types_contains_modes_and_index_widget(monkeypatch, base_url):
+    """The combo lists random / by_name / increment (no `select` —
+    that lives on the separate MetascanSelectPrompt node) and there's
+    an ``index`` widget with sensible defaults."""
     import respx as _respx
     with _respx.mock:
         from mscan_client.cache import clear_cache as _clear
@@ -678,7 +641,7 @@ def test_input_types_contains_new_modes_and_index_widget(monkeypatch, base_url):
 
         spec = MetascanLoadPrompt.INPUT_TYPES()
         modes = spec["required"]["selection_mode"][0]
-        assert modes == ["random", "by_name", "select", "increment"]
+        assert modes == ["random", "by_name", "increment"]
         idx_type, idx_opts = spec["required"]["index"]
         assert idx_type == "INT"
         assert idx_opts["default"] == 1

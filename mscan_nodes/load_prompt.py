@@ -22,7 +22,7 @@ from mscan_nodes.resolution import QUALITY_TIERS, compute_resolution
 from mscan_nodes.settings import get_current_override
 
 
-SelectionMode = Literal["random", "by_name", "select", "increment"]
+SelectionMode = Literal["random", "by_name", "increment"]
 
 
 def select_prompt(
@@ -30,19 +30,19 @@ def select_prompt(
 ) -> dict:
     """Pick one row from a search result.
 
-    - ``by_name`` / ``select``: return the row where ``row["name"] == name``.
-      Both modes use the same name-lookup path — they only differ in how
-      the frontend collects the name from the user (free-text vs.
-      thumbnail picker). If no row matches, raise ``RuntimeError``.
+    - ``by_name``: return the row where ``row["name"] == name``. If no
+      row matches, raise ``RuntimeError`` with a message the node
+      surfaces directly.
     - ``random``: return ``rows[seed % len(rows)]`` (reproducible by
       seed so workflow re-runs yield the same prompt).
     - ``increment``: not handled here — the node clamps + wraps inline
       because it also needs to surface the next index back to the UI.
+      Pick visually via the standalone ``MetascanSelectPrompt`` node.
     - Empty ``rows`` raises ``RuntimeError`` regardless of mode.
     """
     if not rows:
         raise RuntimeError("no saved prompts match the folder + target_model filter")
-    if mode in ("by_name", "select"):
+    if mode == "by_name":
         for r in rows:
             if r.get("name") == name:
                 return r
@@ -94,7 +94,7 @@ class MetascanLoadPrompt:
             "required": {
                 "folder": (folders,),
                 "target_model": (target_models,),
-                "selection_mode": (["random", "by_name", "select", "increment"],),
+                "selection_mode": (["random", "by_name", "increment"],),
                 "prompt_name": ("STRING", {"default": ""}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**31 - 1}),
                 "index": ("INT", {"default": 1, "min": 1, "max": 2**31 - 1}),

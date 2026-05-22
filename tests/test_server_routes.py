@@ -43,9 +43,11 @@ SAMPLE_ROWS = [
 
 
 @respx.mock
-def test_list_prompts_returns_name_and_path_only(monkeypatch, base_url, folders_payload):
-    """The picker only needs ``name`` + ``file_path`` — strip everything
-    else from the metascan row before handing to the browser."""
+def test_list_prompts_returns_picker_shape(monkeypatch, base_url, folders_payload):
+    """Picker payload carries name + file_path + prompt + negative so
+    the Select Prompt node can populate all four widgets at pick-time
+    without a follow-up fetch. Rows with empty file_path are dropped
+    (the picker can't render or stream them)."""
     clear_cache()
     respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
     respx.post(f"{base_url}/api/prompt/search").mock(
@@ -57,10 +59,9 @@ def test_list_prompts_returns_name_and_path_only(monkeypatch, base_url, folders_
     mscan_nodes.settings._OVERRIDE = None
 
     rows = server_routes.list_prompts_for_picker(folder="Portraits", target_model="qwen")
-    # file_path="" row is dropped — picker can't render or pick it.
     assert rows == [
-        {"name": "hero", "file_path": "/a.png"},
-        {"name": "cinematic", "file_path": "/b.png"},
+        {"name": "hero", "file_path": "/a.png", "prompt": "p1", "negative": ""},
+        {"name": "cinematic", "file_path": "/b.png", "prompt": "p2", "negative": "n2"},
     ]
 
 

@@ -34,8 +34,13 @@ from mscan_nodes.load_prompt import _build_client, _folder_id_for_name
 
 
 def list_prompts_for_picker(folder: str, target_model: str) -> list[dict]:
-    """Return ``[{"name", "file_path"}, ...]`` for the chosen folder +
-    target_model filter, ordered as metascan returns them.
+    """Return ``[{"name", "file_path", "prompt", "negative"}, ...]`` for
+    the chosen folder + target_model filter, ordered as metascan returns
+    them.
+
+    The Select Prompt node populates its positive/negative widgets at
+    pick-time from this payload — no extra run-time fetch — so include
+    the prompt text here rather than only ``{name, file_path}``.
 
     Mirrors the filter logic in ``MetascanLoadPrompt._fetch_live``:
     - ``target_model == "any"`` → no model filter (None).
@@ -55,7 +60,12 @@ def list_prompts_for_picker(folder: str, target_model: str) -> list[dict]:
         limit=500,
     )
     return [
-        {"name": r.get("name", "") or "", "file_path": r.get("file_path", "") or ""}
+        {
+            "name": r.get("name", "") or "",
+            "file_path": r.get("file_path", "") or "",
+            "prompt": r.get("prompt", "") or "",
+            "negative": r.get("negative") or "",  # SQL NULL → ""
+        }
         for r in rows
         if r.get("file_path")
     ]
