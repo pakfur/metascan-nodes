@@ -22,7 +22,7 @@ from mscan_nodes.resolution import QUALITY_TIERS, compute_resolution
 from mscan_nodes.settings import get_current_override
 
 
-SelectionMode = Literal["random", "by_name"]
+SelectionMode = Literal["random", "by_name", "select", "increment"]
 
 
 def select_prompt(
@@ -30,16 +30,19 @@ def select_prompt(
 ) -> dict:
     """Pick one row from a search result.
 
-    - ``by_name``: return the row where ``row["name"] == name``. If no
-      row matches, raise ``RuntimeError`` with a message the node
-      surfaces directly.
+    - ``by_name`` / ``select``: return the row where ``row["name"] == name``.
+      Both modes use the same name-lookup path — they only differ in how
+      the frontend collects the name from the user (free-text vs.
+      thumbnail picker). If no row matches, raise ``RuntimeError``.
     - ``random``: return ``rows[seed % len(rows)]`` (reproducible by
       seed so workflow re-runs yield the same prompt).
+    - ``increment``: not handled here — the node clamps + wraps inline
+      because it also needs to surface the next index back to the UI.
     - Empty ``rows`` raises ``RuntimeError`` regardless of mode.
     """
     if not rows:
         raise RuntimeError("no saved prompts match the folder + target_model filter")
-    if mode == "by_name":
+    if mode in ("by_name", "select"):
         for r in rows:
             if r.get("name") == name:
                 return r
@@ -91,9 +94,10 @@ class MetascanLoadPrompt:
             "required": {
                 "folder": (folders,),
                 "target_model": (target_models,),
-                "selection_mode": (["random", "by_name"],),
+                "selection_mode": (["random", "by_name", "select", "increment"],),
                 "prompt_name": ("STRING", {"default": ""}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**31 - 1}),
+                "index": ("INT", {"default": 1, "min": 1, "max": 2**31 - 1}),
                 "quality": (QUALITY_TIERS,),
                 "live_load": ("BOOLEAN", {"default": True}),
                 "positive_prompt": ("STRING", {"multiline": True, "default": ""}),
@@ -112,12 +116,13 @@ class MetascanLoadPrompt:
         live_load: bool,
         positive_prompt: str,
         negative_prompt: str,
+        index: int = 1,
     ) -> dict:
         if live_load:
             fetched = self._fetch_live(
                 folder=folder, target_model=target_model,
                 selection_mode=selection_mode, prompt_name=prompt_name,
-                seed=seed,
+                seed=seed, index=index,
             )
             # Cache only what can't be edited via widgets. Prompt text
             # is the user's job from here on out (the JS extension
@@ -135,6 +140,8 @@ class MetascanLoadPrompt:
                 "positive_prompt": [positive],
                 "negative_prompt": [negative],
             }
+            if "next_index" in fetched:
+                ui["index"] = [fetched["next_index"]]
         else:
             if self._cache is None:
                 raise RuntimeError(
@@ -164,9 +171,12 @@ class MetascanLoadPrompt:
         selection_mode: SelectionMode,
         prompt_name: str,
         seed: int,
+        index: int,
     ) -> dict:
         """Hit metascan for prompt row + source image bytes and return
-        the cache-shaped dict that ``load()`` consumes."""
+        the cache-shaped dict that ``load()`` consumes. Includes
+        ``next_index`` when ``selection_mode == "increment"`` so the
+        node can echo the advanced value back to the UI widget."""
         if folder == OFFLINE_SENTINEL or target_model == OFFLINE_SENTINEL:
             raise RuntimeError(
                 "Metascan is offline — bring it up or correct MetascanSettings."
@@ -177,13 +187,33 @@ class MetascanLoadPrompt:
         # "any" is a virtual UI option — map to null filter.
         wire_target: Optional[str] = None if target_model == "any" else target_model
 
+        # The server-side `name` filter helps only for by_name; select
+        # mode also drives by name but it's been picked client-side and
+        # we still want the full filtered set echoed back unchanged.
         rows = client.search_prompts(
             folder_id=folder_id,
             target_model=wire_target,
             name=prompt_name if selection_mode == "by_name" and prompt_name else None,
             limit=500,
         )
-        chosen = select_prompt(rows, mode=selection_mode, name=prompt_name, seed=seed)
+
+        next_index: Optional[int] = None
+        if selection_mode == "increment":
+            if not rows:
+                raise RuntimeError(
+                    "no saved prompts match the folder + target_model filter"
+                )
+            n = len(rows)
+            # Defensive clamp: widget min=1 in the UI but a malformed
+            # workflow JSON (or a future change) might still hand us
+            # an out-of-range value.
+            clamped = max(1, min(index, n))
+            chosen = rows[clamped - 1]
+            next_index = (clamped % n) + 1
+        else:
+            chosen = select_prompt(
+                rows, mode=selection_mode, name=prompt_name, seed=seed,
+            )
 
         source_file_path = chosen.get("file_path", "") or ""
         if not source_file_path:
@@ -194,10 +224,13 @@ class MetascanLoadPrompt:
 
         raw = client.stream_bytes(source_file_path)
         image = bytes_to_tensor(raw)
-        return {
+        out: dict = {
             "image": image,
             "positive": chosen.get("prompt", "") or "",
             "negative": chosen.get("negative") or "",   # SQL NULL → ""
             "name": chosen.get("name", "") or "",
             "source_file_path": source_file_path,
         }
+        if next_index is not None:
+            out["next_index"] = next_index
+        return out

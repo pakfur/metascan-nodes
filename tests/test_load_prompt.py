@@ -468,3 +468,218 @@ def test_live_load_false_with_typed_text_still_requires_image_cache(monkeypatch,
             prompt_name="", seed=0, quality="Balanced", live_load=False,
             positive_prompt="text from user", negative_prompt="more text",
         )
+
+
+# ----- select mode -----
+
+def test_select_prompt_select_mode_returns_matching_row():
+    row = select_prompt(SAMPLE_ROWS, mode="select", name="landscape", seed=0)
+    assert row["id"] == 3
+
+
+def test_select_prompt_select_mode_missing_raises():
+    with pytest.raises(RuntimeError, match="no saved prompt"):
+        select_prompt(SAMPLE_ROWS, mode="select", name="missing", seed=0)
+
+
+@respx.mock
+def test_execute_select_mode_behaves_like_by_name(monkeypatch, base_url, folders_payload):
+    """``select`` mode shares the name-lookup path with ``by_name`` —
+    the only difference is how the frontend collected the name."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": SAMPLE_ROWS})
+    )
+    respx.get(f"{base_url}/api/stream/%2Fc.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes())
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    out = MetascanLoadPrompt().load(
+        folder="Portraits", target_model="qwen", selection_mode="select",
+        prompt_name="landscape", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="",
+    )
+    _, pos, _, name, src, _, _ = out["result"]
+    assert (pos, name, src) == ("p3", "landscape", "/c.png")
+
+
+# ----- increment mode -----
+
+@respx.mock
+def test_execute_increment_picks_by_index_and_advances(monkeypatch, base_url, folders_payload):
+    """``increment`` picks row at 1-based index and surfaces next_index
+    via the ui dict so the JS extension can advance the widget."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": SAMPLE_ROWS})
+    )
+    respx.get(f"{base_url}/api/stream/%2Fb.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes())
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    out = MetascanLoadPrompt().load(
+        folder="Portraits", target_model="qwen", selection_mode="increment",
+        prompt_name="", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="", index=2,
+    )
+    _, pos, _, name, src, _, _ = out["result"]
+    assert (pos, name, src) == ("p2", "cinematic", "/b.png")
+    assert out["ui"]["index"] == [3]
+
+
+@respx.mock
+def test_execute_increment_wraps_at_end(monkeypatch, base_url, folders_payload):
+    """When index == len(rows) the next_index wraps to 1."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": SAMPLE_ROWS})
+    )
+    respx.get(f"{base_url}/api/stream/%2Fc.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes())
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    out = MetascanLoadPrompt().load(
+        folder="Portraits", target_model="qwen", selection_mode="increment",
+        prompt_name="", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="", index=3,
+    )
+    _, _, _, name, _, _, _ = out["result"]
+    assert name == "landscape"
+    assert out["ui"]["index"] == [1]
+
+
+@respx.mock
+def test_execute_increment_clamps_low(monkeypatch, base_url, folders_payload):
+    """index <= 0 clamps to 1 (use first row, advance to 2)."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": SAMPLE_ROWS})
+    )
+    respx.get(f"{base_url}/api/stream/%2Fa.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes())
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    out = MetascanLoadPrompt().load(
+        folder="Portraits", target_model="qwen", selection_mode="increment",
+        prompt_name="", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="", index=0,
+    )
+    _, _, _, name, _, _, _ = out["result"]
+    assert name == "hero"
+    assert out["ui"]["index"] == [2]
+
+
+@respx.mock
+def test_execute_increment_clamps_high(monkeypatch, base_url, folders_payload):
+    """index > len clamps to len (use last row, then wrap to 1)."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": SAMPLE_ROWS})
+    )
+    respx.get(f"{base_url}/api/stream/%2Fc.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes())
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    out = MetascanLoadPrompt().load(
+        folder="Portraits", target_model="qwen", selection_mode="increment",
+        prompt_name="", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="", index=999,
+    )
+    _, _, _, name, _, _, _ = out["result"]
+    assert name == "landscape"
+    assert out["ui"]["index"] == [1]
+
+
+@respx.mock
+def test_execute_increment_empty_rows_raises(monkeypatch, base_url, folders_payload):
+    """Same empty-rows guard as the other modes."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": []})
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    with pytest.raises(RuntimeError, match="no saved prompts"):
+        MetascanLoadPrompt().load(
+            folder="Portraits", target_model="qwen", selection_mode="increment",
+            prompt_name="", seed=0, quality="Balanced", live_load=True,
+            positive_prompt="", negative_prompt="", index=1,
+        )
+
+
+@respx.mock
+def test_execute_increment_single_row_wraps_to_self(monkeypatch, base_url, folders_payload):
+    """Edge case: with one row, next_index is always 1."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
+    respx.post(f"{base_url}/api/prompt/search").mock(
+        return_value=httpx.Response(200, json={"prompts": [SAMPLE_ROWS[0]]})
+    )
+    respx.get(f"{base_url}/api/stream/%2Fa.png").mock(
+        return_value=httpx.Response(200, content=_png_bytes())
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    out = MetascanLoadPrompt().load(
+        folder="Portraits", target_model="qwen", selection_mode="increment",
+        prompt_name="", seed=0, quality="Balanced", live_load=True,
+        positive_prompt="", negative_prompt="", index=1,
+    )
+    assert out["ui"]["index"] == [1]
+
+
+def test_input_types_contains_new_modes_and_index_widget(monkeypatch, base_url):
+    """The combo lists all four modes and there's an ``index`` widget
+    with sensible defaults."""
+    import respx as _respx
+    with _respx.mock:
+        from mscan_client.cache import clear_cache as _clear
+        _clear()
+        _respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=[]))
+        _respx.get(f"{base_url}/api/prompt/target-models").mock(
+            return_value=httpx.Response(200, json={"target_models": ["qwen"]})
+        )
+        monkeypatch.setenv("METASCAN_URL", base_url)
+        monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+        import mscan_nodes.settings
+        mscan_nodes.settings._OVERRIDE = None
+
+        spec = MetascanLoadPrompt.INPUT_TYPES()
+        modes = spec["required"]["selection_mode"][0]
+        assert modes == ["random", "by_name", "select", "increment"]
+        idx_type, idx_opts = spec["required"]["index"]
+        assert idx_type == "INT"
+        assert idx_opts["default"] == 1
+        assert idx_opts["min"] == 1

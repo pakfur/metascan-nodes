@@ -23,13 +23,25 @@ This node depends on the companion metascan endpoints `POST /api/prompt/search` 
 |------------------|-----------|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `folder`         | (dropdown) | —          | Manual folder name. Saved prompts are searched within this folder.                                                                                   |
 | `target_model`   | (dropdown) | —          | Filter to one diffusion model (`sd`, `pony`, `flux1`, `flux2`, `zimage`, `chroma`, `qwen`) or `any` to match any model. Also drives resolution rules. |
-| `selection_mode` | (enum)    | `random`    | `random` returns `rows[seed % N]`. `by_name` returns the row whose `name` matches `prompt_name`.                                                     |
-| `prompt_name`    | `STRING`  | *(empty)*   | Required when `selection_mode = by_name`. Ignored in `random` mode.                                                                                  |
-| `seed`           | `INT`     | `0`         | Selection seed for `random` mode. Same seed + same filter set always picks the same row.                                                             |
+| `selection_mode` | (enum)    | `random`    | `random` / `by_name` / `select` / `increment`. See [Selection modes](#selection-modes) below.                                                        |
+| `prompt_name`    | `STRING`  | *(empty)*   | Required when `selection_mode` is `by_name` or `select`. Ignored in `random` and `increment` modes. The 🖼 Pick prompt picker writes into this widget. |
+| `seed`           | `INT`     | `0`         | Selection seed for `random` mode. Same seed + same filter set always picks the same row. Ignored in other modes.                                     |
+| `index`          | `INT`     | `1`         | 1-based row index for `increment` mode. Auto-advances after each execute (wraps to 1 after the last row). Out-of-range values clamp to `[1, N]`. Ignored in other modes. |
 | `quality`        | (enum)    | `Fast`      | `Fast` / `Balanced` / `High` / `Ultra`. See [resolution rules](load-from-folder.md#resolution-rules) — algorithm and per-tier pixel budgets are identical to Load From Folder. |
 | `live_load`      | `BOOLEAN` | `True`      | If `True`, fetch from metascan, refresh the cache, and overwrite the `positive_prompt` / `negative_prompt` widgets with the fetched text. If `False`, reuse the cached image + name + path, take prompt text from the widgets, and recompute `width` / `height`. |
 | `positive_prompt`| `STRING`  | *(empty)*   | Editable multiline text. On `live_load=True` this widget is overwritten with the fetched positive prompt; on `live_load=False` its contents are passed straight through to the `positive` output. |
 | `negative_prompt`| `STRING`  | *(empty)*   | Editable multiline text. Same semantics as `positive_prompt` for the negative prompt.                                                                                                              |
+
+### Selection modes
+
+| Mode        | Picks which row?                                                                          | Driven by widget |
+|-------------|-------------------------------------------------------------------------------------------|------------------|
+| `random`    | `rows[seed % len(rows)]` — deterministic per seed.                                        | `seed`           |
+| `by_name`   | The row whose `name` matches `prompt_name`. Case-sensitive exact match.                   | `prompt_name`    |
+| `select`    | Same as `by_name`, but the 🖼 **Pick prompt** button opens a thumbnail picker overlay that writes the chosen name back into `prompt_name`. Pick visually instead of typing. | `prompt_name` (set via picker) |
+| `increment` | `rows[index-1]` (1-based). After execute, `index` advances by 1 and wraps to 1 past the last row. Lets you step through a folder in order across runs. | `index`          |
+
+The picker overlay (`select` mode and also usable as a shortcut in any mode) hits two ComfyUI-side proxy routes that this package registers — `GET /metscan/prompts` and `GET /metscan/thumbnail/<file_path>` — which then call metascan. Browsers never talk to metascan directly; the picker only works when ComfyUI itself can reach the metascan instance. If metascan is unreachable when you open the picker, the overlay shows an offline message rather than failing the workflow.
 
 ### Caching semantics
 
@@ -60,8 +72,9 @@ Typical workflow: enable `live_load` once, run, then disable it and edit the `po
 ## Behavior notes
 
 - `target_model = any` maps to `null` server-side in `POST /api/prompt/search`, so the API returns prompts from all models. The resolution calculator falls back to Flux-style rules for `any`.
-- The `seed` input only affects `random` selection — in `by_name` mode the seed is ignored, and the same `prompt_name` always selects the same prompt deterministically.
-- The companion `POST /api/prompt/search` endpoint hard-caps `limit` at 500 server-side; the node sends `limit=500`. Folders with more than 500 prompts may not surface the prompt you wanted via `random` — narrow with `target_model` or use `by_name`.
+- The `seed` input only affects `random` selection. In `by_name` and `select` modes the seed is ignored and the chosen name fully determines the row. In `increment` mode the seed is ignored and `index` drives selection.
+- The companion `POST /api/prompt/search` endpoint hard-caps `limit` at 500 server-side; the node sends `limit=500`. Folders with more than 500 prompts may not surface the prompt you wanted via `random` / `increment` — narrow with `target_model` or use `by_name` / `select`.
+- `increment` mode echoes the *next* index back to the widget via the ComfyUI `ui` channel, so opening the saved workflow on a fresh page lands on whatever index the last run advanced to.
 
 ## Common errors
 

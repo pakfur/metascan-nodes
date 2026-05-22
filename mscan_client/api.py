@@ -111,6 +111,21 @@ class MetascanClient:
             raise ApiError(status_code=r.status_code, body_excerpt=r.text[:500])
         return r.content
 
+    def stream_thumbnail_bytes(self, file_path: str) -> bytes:
+        """Return the cached JPEG thumbnail bytes for ``file_path``.
+        Used by the ComfyUI server-route proxy that powers the
+        thumbnail-picker UI on Load Prompt — full source image bytes
+        would be wasteful for a 96px-row list."""
+        try:
+            r = self._http.get(f"/api/media/thumbnails/{self._encode_path(file_path)}")
+        except httpx.TimeoutException as e:
+            raise OfflineError(reason=f"timeout: {e}") from e
+        except httpx.TransportError as e:
+            raise OfflineError(reason=str(e)) from e
+        if r.status_code >= 400:
+            raise ApiError(status_code=r.status_code, body_excerpt=r.text[:500])
+        return r.content
+
     # ------------------------------------------------------------------
     # Prompts
     # ------------------------------------------------------------------

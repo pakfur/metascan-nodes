@@ -16,6 +16,11 @@ from mscan_nodes.save_image import MetascanSaveImage
 from mscan_nodes.load_from_folder import MetascanLoadFromFolder
 from mscan_nodes.load_prompt import MetascanLoadPrompt
 
+# Import for side effect: registers /metscan/prompts and /metscan/thumbnail
+# routes on PromptServer.instance.routes (no-op if PromptServer isn't
+# importable, e.g. under pytest).
+from mscan_nodes import server_routes  # noqa: F401
+
 NODE_CLASS_MAPPINGS = {
     "MetascanSettings": MetascanSettings,
     "MetascanSaveImage": MetascanSaveImage,
