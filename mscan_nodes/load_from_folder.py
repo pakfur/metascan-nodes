@@ -98,15 +98,17 @@ def _build_client() -> MetascanClient:
     return MetascanClient(config=cfg, timeout=10.0)
 
 
-def _folder_id_for_name(client: MetascanClient, name: str) -> str:
-    """Resolve a human folder name to its (string) folder ID.
+def _folder_by_name(client: MetascanClient, name: str) -> dict:
+    """Resolve a human folder name to its full record.
 
-    The dropdown shows names; the API takes IDs. We re-fetch the folder
-    list here rather than relying on the cached name list because the
-    cached version doesn't carry IDs."""
+    Walks ``list_folders()`` rather than calling a per-folder endpoint
+    because metascan doesn't expose ``GET /api/folders/{id}`` — the
+    list-folders payload already carries each manual folder's
+    ``items`` array, so a single round-trip is enough for both id
+    lookup and items access."""
     for folder in client.list_folders():
-        if folder["name"] == name:
-            return folder["id"]
+        if folder.get("name") == name:
+            return folder
     raise RuntimeError(f"folder not found in metascan: {name!r}")
 
 
@@ -158,9 +160,8 @@ class MetascanLoadFromFolder:
             )
 
         client = _build_client()
-        folder_id = _folder_id_for_name(client, folder)
-        folder_detail = client.get_folder(folder_id)
-        items = folder_detail.get("items", []) or []
+        folder_record = _folder_by_name(client, folder)
+        items = folder_record.get("items", []) or []
 
         filtered = filter_paths(items, image_only=image_only, filename_filter=filename_filter)
         chosen, next_seed = select_path(filtered, mode=selection_mode, seed=seed, index=index)

@@ -60,11 +60,24 @@ def _build_client() -> MetascanClient:
     return MetascanClient(config=cfg, timeout=10.0)
 
 
-def _folder_id_for_name(client: MetascanClient, name: str) -> str:
+def _folder_by_name(client: MetascanClient, name: str) -> dict:
+    """Return the metascan folder record matching ``name``.
+
+    Walks ``list_folders()`` rather than calling a per-folder endpoint
+    because metascan doesn't expose ``GET /api/folders/{id}`` — the
+    list-folders payload already carries each manual folder's
+    ``items`` array, so a single round-trip is enough for both id
+    lookup and items access.
+    """
     for folder in client.list_folders():
-        if folder["name"] == name:
-            return folder["id"]
+        if folder.get("name") == name:
+            return folder
     raise RuntimeError(f"folder not found in metascan: {name!r}")
+
+
+def _folder_id_for_name(client: MetascanClient, name: str) -> str:
+    """Convenience for callers that only need the folder id."""
+    return _folder_by_name(client, name)["id"]
 
 
 class MetascanLoadPrompt:

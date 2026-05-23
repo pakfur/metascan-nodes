@@ -23,7 +23,7 @@ from typing import Optional
 
 from mscan_client.cache import OFFLINE_SENTINEL
 from mscan_client.errors import ApiError, OfflineError
-from mscan_nodes.load_prompt import _build_client, _folder_id_for_name
+from mscan_nodes.load_prompt import _build_client, _folder_by_name, _folder_id_for_name
 
 
 # ---------------------------------------------------------------------------
@@ -104,9 +104,11 @@ def list_images_for_picker(folder: str) -> list[dict]:
     item in the chosen folder, ordered as metascan returns them.
 
     Used by MetascanSelectImage's picker. Unlike
-    :func:`list_prompts_for_picker`, this hits ``GET /api/folders/{id}``
-    and walks ``folder.items`` directly — so images that don't have a
-    saved prompt still show up.
+    :func:`list_prompts_for_picker`, this walks the folder's ``items``
+    list directly — so images that don't have a saved prompt still show
+    up. Metascan's ``list_folders`` already populates ``items`` per
+    manual folder in the same response, so this is a single round-trip
+    (and there's no per-folder GET on metascan to call anyway).
 
     Videos and other non-image items are filtered out by extension
     (Select Image's downstream is always a still-image decode).
@@ -115,9 +117,8 @@ def list_images_for_picker(folder: str) -> list[dict]:
         return []
 
     client = _build_client()
-    folder_id = _folder_id_for_name(client, folder)
-    folder_detail = client.get_folder(folder_id)
-    items = folder_detail.get("items", []) or []
+    folder_record = _folder_by_name(client, folder)
+    items = folder_record.get("items", []) or []
     return [
         {"name": _basename(p), "file_path": p}
         for p in items

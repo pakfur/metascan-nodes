@@ -77,10 +77,12 @@ class MetascanClient:
         folders = self._request_json("GET", "/api/folders")
         return [f for f in folders if f.get("kind") == "manual"]
 
-    def get_folder(self, folder_id: str) -> dict:
-        """Return a single folder record. For manual folders the record
-        already includes a resolved `items: [path, ...]` list."""
-        return self._request_json("GET", f"/api/folders/{folder_id}")
+    # NOTE: there is no get_folder(id) method. Metascan doesn't expose
+    # a ``GET /api/folders/{id}`` endpoint — the list-folders payload
+    # already includes each manual folder's ``items`` array, so callers
+    # that need one folder walk ``list_folders()`` instead. See
+    # ``_folder_by_name`` in mscan_nodes/load_prompt.py and
+    # mscan_nodes/load_from_folder.py.
 
     # ------------------------------------------------------------------
     # Media

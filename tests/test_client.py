@@ -106,25 +106,6 @@ def test_list_folders_returns_manual_only(client: MetascanClient, base_url: str,
     assert all(f["kind"] == "manual" for f in out)
 
 
-# ----- get_folder -----
-
-@respx.mock
-def test_get_folder_returns_record(client: MetascanClient, base_url: str, folders_payload):
-    target = folders_payload[0]
-    respx.get(f"{base_url}/api/folders/fld_a").mock(return_value=httpx.Response(200, json=target))
-    out = client.get_folder("fld_a")
-    assert out["id"] == "fld_a"
-    assert out["items"] == ["/data/a/img1.png", "/data/a/img2.png", "/data/a/clip.mp4"]
-
-
-@respx.mock
-def test_get_folder_raises_api_error_on_404(client: MetascanClient, base_url: str):
-    respx.get(f"{base_url}/api/folders/missing").mock(return_value=httpx.Response(404, text="not found"))
-    with pytest.raises(ApiError) as excinfo:
-        client.get_folder("missing")
-    assert excinfo.value.status_code == 404
-
-
 # ----- get_media_detail -----
 
 @respx.mock

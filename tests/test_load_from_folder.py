@@ -144,11 +144,10 @@ def test_input_types_lists_manual_folder_names(monkeypatch, base_url, folders_pa
 @respx.mock
 def test_execute_loads_image_and_metadata(monkeypatch, base_url, folders_payload):
     clear_cache()
+    # list_folders payload already carries each manual folder's `items`
+    # array — production code reads items straight off this single
+    # response, no per-folder GET.
     respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
-    # Portraits folder detail (id fld_a, items list).
-    respx.get(f"{base_url}/api/folders/fld_a").mock(
-        return_value=httpx.Response(200, json=folders_payload[0])
-    )
     # Pick will land on img1.png (sorted-first). Stub its media + bytes.
     respx.get(f"{base_url}/api/media/%2Fdata%2Fa%2Fimg1.png").mock(
         return_value=httpx.Response(200, json={
@@ -187,9 +186,9 @@ def test_execute_loads_image_and_metadata(monkeypatch, base_url, folders_payload
 @respx.mock
 def test_execute_raises_on_empty_folder(monkeypatch, base_url, folders_payload):
     clear_cache()
-    empty_folder = {**folders_payload[1]}   # Landscapes — already empty
+    # Landscapes (fld_b) is the empty manual folder in the fixture; its
+    # `items: []` lives on this single list-folders response.
     respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
-    respx.get(f"{base_url}/api/folders/fld_b").mock(return_value=httpx.Response(200, json=empty_folder))
     monkeypatch.setenv("METASCAN_URL", base_url)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
     import mscan_nodes.settings
@@ -219,9 +218,6 @@ def test_execute_emits_resolution_for_landscape_qwen(monkeypatch, base_url, fold
     1664x928 bucket."""
     clear_cache()
     respx.get(f"{base_url}/api/folders").mock(return_value=httpx.Response(200, json=folders_payload))
-    respx.get(f"{base_url}/api/folders/fld_a").mock(
-        return_value=httpx.Response(200, json=folders_payload[0])
-    )
     respx.get(f"{base_url}/api/media/%2Fdata%2Fa%2Fimg1.png").mock(
         return_value=httpx.Response(200, json={
             "file_path": "/data/a/img1.png",

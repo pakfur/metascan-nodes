@@ -112,28 +112,29 @@ def test_list_prompts_empty_folder_returns_empty():
 
 
 @respx.mock
-def test_list_images_returns_folder_items_filtered_to_images(
-    monkeypatch, base_url, folders_payload
-):
-    """Hits GET /api/folders/{id}, walks `items`, and returns
-    {name, file_path} for image-typed paths only. Videos / other
+def test_list_images_returns_folder_items_filtered_to_images(monkeypatch, base_url):
+    """Walks the folder's ``items`` list straight off the list-folders
+    payload (metascan doesn't expose GET /api/folders/{id}) and returns
+    {name, file_path} for image-typed paths only. Videos / non-image
     extensions are dropped."""
     clear_cache()
     respx.get(f"{base_url}/api/folders").mock(
-        return_value=httpx.Response(200, json=folders_payload)
-    )
-    respx.get(f"{base_url}/api/folders/fld_a").mock(
-        return_value=httpx.Response(200, json={
-            "id": "fld_a", "name": "Portraits", "kind": "manual",
-            "items": [
-                "/data/a/img1.png",
-                "/data/a/img2.JPG",  # case-insensitive
-                "/data/a/clip.mp4",  # video — dropped
-                "/data/a/snap.webp",
-                "/data/a/readme.txt",  # non-media — dropped
-                "/data/a/c:\\windows\\path.jpeg",  # Windows path — basename works
-            ],
-        })
+        return_value=httpx.Response(200, json=[
+            {
+                "id": "fld_a", "name": "Portraits", "kind": "manual",
+                "icon": "pi-folder", "sort_order": 0, "count": 6,
+                "items": [
+                    "/data/a/img1.png",
+                    "/data/a/img2.JPG",  # case-insensitive
+                    "/data/a/clip.mp4",  # video — dropped
+                    "/data/a/snap.webp",
+                    "/data/a/readme.txt",  # non-media — dropped
+                    "/data/a/c:\\windows\\path.jpeg",  # Windows path — basename works
+                ],
+                "created_at": "2026-05-01T00:00:00",
+                "updated_at": "2026-05-01T00:00:00",
+            },
+        ])
     )
     monkeypatch.setenv("METASCAN_URL", base_url)
     monkeypatch.delenv("METASCAN_API_KEY", raising=False)
