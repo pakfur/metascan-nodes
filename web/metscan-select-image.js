@@ -9,6 +9,20 @@ const NODE_CLASS = "MetascanSelectImage";
 const HIDDEN_TYPE = "converted-widget";
 const HIDDEN_SIZE = () => [0, -4];
 
+// Grow a node so it fits its current widgets, but never shrink it.
+// Plain `node.setSize(node.computeSize())` would collapse the node to
+// the minimum every time nodeCreated fires (including workflow
+// deserialize), blowing away user-resized and saved sizes.
+function ensureMinSize(node) {
+    if (!node) return;
+    const min = node.computeSize?.();
+    if (!min) return;
+    const cur = node.size || [0, 0];
+    const w = Math.max(cur[0], min[0]);
+    const h = Math.max(cur[1], min[1]);
+    if (w !== cur[0] || h !== cur[1]) node.setSize?.([w, h]);
+}
+
 function setHidden(widget, hidden) {
     if (!widget) return;
     if (hidden) {
@@ -38,17 +52,27 @@ function setHidden(widget, hidden) {
 
 function setPreview(node, filePath) {
     if (!filePath) {
+        const saved = node.size ? [...node.size] : null;
         node.imgs = [];
+        if (saved) node.setSize?.(saved);
         node.setDirtyCanvas?.(true, true);
         return;
     }
     const img = new Image();
     img.onload = () => {
+        // ComfyUI's image-aware code path (setSizeForImage et al.)
+        // can grow the node when imgs is assigned and the next draw
+        // happens. Snapshot the size and restore it so user-set or
+        // workflow-saved dimensions survive a pick.
+        const saved = node.size ? [...node.size] : null;
         node.imgs = [img];
+        if (saved) node.setSize?.(saved);
         node.setDirtyCanvas?.(true, true);
     };
     img.onerror = () => {
+        const saved = node.size ? [...node.size] : null;
         node.imgs = [];
+        if (saved) node.setSize?.(saved);
         node.setDirtyCanvas?.(true, true);
     };
     img.src = `/metscan/thumbnail?file_path=${encodeURIComponent(filePath)}`;
@@ -322,8 +346,7 @@ app.registerExtension({
 
         setTimeout(() => {
             refreshLabel();
-            const newSize = node.computeSize?.();
-            if (newSize) node.setSize?.(newSize);
+            ensureMinSize(node);
             const filePath = sourceFilePathWidget?.value || "";
             if (filePath) setPreview(node, filePath);
         }, 0);
