@@ -11,7 +11,7 @@ This is a trimmed sibling of [Metascan · Select Prompt](select-prompt.md). Diff
 ## What it pulls from metascan
 
 - **At node-load time:** `GET /api/folders` (cached) and `GET /api/prompt/target-models` (cached) for the two dropdowns.
-- **On 🖼 Pick image:** `GET /metscan/images?folder=` (ComfyUI-side proxy → `GET /api/folders/{id}` for the folder's items) for the list, plus `GET /metscan/thumbnail?file_path=…` per visible row.
+- **On 🖼 Pick image:** `GET /metscan/images?folder=` (ComfyUI-side proxy → walks `GET /api/folders` and reads the folder's inline `items`) for the list, plus `GET /metscan/thumbnail?file_path=…` per visible row. The row list is cached per folder for the page lifetime; press **R** with the picker open to drop that entry and re-fetch.
 - **On pick (immediate preview):** `GET /metscan/thumbnail?file_path=…` once more, rendered on the node face via `node.imgs`.
 - **At execute time:** `GET /api/stream/{source_file_path}` for the full source bytes. Cached per-instance so reruns with the same pick skip the network.
 

@@ -7,7 +7,7 @@ This is a deliberately simpler sibling of [Metascan · Load Prompt](load-prompt.
 ## What it pulls from metascan
 
 - **At node-load time:** `GET /api/folders` and `GET /api/prompt/target-models` (cached) to populate the two dropdowns.
-- **On 🖼 Pick prompt:** `GET /metscan/prompts?folder=&target_model=` (ComfyUI-side proxy → metascan's `POST /api/prompt/search`) for the row list, plus `GET /metscan/thumbnail?file_path=…` per visible row.
+- **On 🖼 Pick prompt:** `GET /metscan/prompts?folder=&target_model=` (ComfyUI-side proxy → metascan's `POST /api/prompt/search`) for the row list, plus `GET /metscan/thumbnail?file_path=…` per visible row. The row list is cached per `(folder, target_model)` for the page lifetime; press **R** with the picker open to drop that entry and re-fetch.
 - **At execute time:** `GET /api/stream/{source_file_path}` for the source image bytes. Cached per-instance, so reruns with the same picked prompt skip the network.
 
 The browser never talks to metascan directly — the two `/metscan/*` proxy routes run inside ComfyUI so auth and reachability stay server-side.

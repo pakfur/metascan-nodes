@@ -59,7 +59,22 @@ function setPreview(node, filePath) {
 // only filters by folder — target_model defaults to "any" server-side).
 // On pick: writes prompt_name + source_file_path, then sets the node
 // face preview.
+//
+// Results are cached per folder for the lifetime of the page; pressing
+// 'R' while the picker is open drops that entry and re-fetches.
 // ---------------------------------------------------------------------------
+
+const imageListCache = new Map();
+
+function fetchImages(folder) {
+    const params = new URLSearchParams({ folder });
+    return fetch(`/metscan/images?${params}`).then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (r.status === 503) throw new Error(data.error || "metascan offline");
+        if (r.status >= 400) throw new Error(data.error || `HTTP ${r.status}`);
+        return data.images || [];
+    });
+}
 
 let activePicker = null;
 
@@ -74,6 +89,7 @@ function openPicker(node, onPicked) {
 
     const widgetByName = (name) => node.widgets?.find((w) => w.name === name);
     const folder = widgetByName("folder")?.value || "";
+    const key = folder;
 
     const root = document.createElement("div");
     root.className = "metscan-image-picker";
@@ -105,30 +121,82 @@ function openPicker(node, onPicked) {
         justifyContent: "space-between",
         alignItems: "center",
     });
-    header.textContent = `Pick image — ${folder}`;
+    const headerLabel = document.createElement("span");
+    headerLabel.textContent = `Pick image — ${folder}`;
+    header.appendChild(headerLabel);
+    const headerRight = document.createElement("span");
+    Object.assign(headerRight.style, { display: "flex", gap: "10px", alignItems: "center" });
+    const hint = document.createElement("span");
+    hint.textContent = "R refresh";
+    Object.assign(hint.style, { fontWeight: "400", fontSize: "11px", opacity: "0.5" });
+    headerRight.appendChild(hint);
     const closeBtn = document.createElement("span");
     closeBtn.textContent = "✕";
     Object.assign(closeBtn.style, { cursor: "pointer", padding: "0 4px", opacity: "0.7" });
     closeBtn.addEventListener("click", closePicker);
-    header.appendChild(closeBtn);
+    headerRight.appendChild(closeBtn);
+    header.appendChild(headerRight);
     root.appendChild(header);
 
     const list = document.createElement("div");
     Object.assign(list.style, { overflowY: "auto", flex: "1 1 auto", padding: "4px 0" });
     root.appendChild(list);
 
-    const status = document.createElement("div");
-    Object.assign(status.style, { padding: "12px", opacity: "0.7" });
-    status.textContent = "Loading…";
-    list.appendChild(status);
-
     document.body.appendChild(root);
+
+    function render(images) {
+        list.innerHTML = "";
+        if (images.length === 0) {
+            const empty = document.createElement("div");
+            Object.assign(empty.style, { padding: "12px", opacity: "0.7" });
+            empty.textContent = "No images in this folder.";
+            list.appendChild(empty);
+            return;
+        }
+        for (const row of images) {
+            list.appendChild(buildRow(row, node, onPicked));
+        }
+    }
+
+    function renderError(message) {
+        list.innerHTML = "";
+        const errorEl = document.createElement("div");
+        Object.assign(errorEl.style, { padding: "12px", color: "#ff8080" });
+        errorEl.textContent = `Failed to load images: ${message}`;
+        list.appendChild(errorEl);
+    }
+
+    function load() {
+        if (imageListCache.has(key)) {
+            render(imageListCache.get(key));
+            return;
+        }
+        list.innerHTML = "";
+        const status = document.createElement("div");
+        Object.assign(status.style, { padding: "12px", opacity: "0.7" });
+        status.textContent = "Loading…";
+        list.appendChild(status);
+        fetchImages(folder)
+            .then((images) => {
+                imageListCache.set(key, images);
+                render(images);
+            })
+            .catch((err) => renderError(err.message));
+    }
 
     function onDocMouseDown(e) {
         if (!root.contains(e.target)) closePicker();
     }
     function onKey(e) {
-        if (e.key === "Escape") closePicker();
+        if (e.key === "Escape") {
+            closePicker();
+        } else if (e.key === "r" || e.key === "R") {
+            const tag = e.target?.tagName;
+            if (tag === "INPUT" || tag === "TEXTAREA") return;
+            e.preventDefault();
+            imageListCache.delete(key);
+            load();
+        }
     }
     function onCanvasInteract() {
         closePicker();
@@ -150,35 +218,7 @@ function openPicker(node, onPicked) {
         },
     };
 
-    const params = new URLSearchParams({ folder });
-    fetch(`/metscan/images?${params}`)
-        .then(async (r) => {
-            const data = await r.json().catch(() => ({}));
-            if (r.status === 503) throw new Error(data.error || "metascan offline");
-            if (r.status >= 400) throw new Error(data.error || `HTTP ${r.status}`);
-            return data;
-        })
-        .then((data) => {
-            const images = data.images || [];
-            list.innerHTML = "";
-            if (images.length === 0) {
-                const empty = document.createElement("div");
-                Object.assign(empty.style, { padding: "12px", opacity: "0.7" });
-                empty.textContent = "No images in this folder.";
-                list.appendChild(empty);
-                return;
-            }
-            for (const row of images) {
-                list.appendChild(buildRow(row, node, onPicked));
-            }
-        })
-        .catch((err) => {
-            list.innerHTML = "";
-            const errorEl = document.createElement("div");
-            Object.assign(errorEl.style, { padding: "12px", color: "#ff8080" });
-            errorEl.textContent = `Failed to load images: ${err.message}`;
-            list.appendChild(errorEl);
-        });
+    load();
 }
 
 function buildRow(row, node, onPicked) {
