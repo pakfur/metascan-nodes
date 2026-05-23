@@ -16,6 +16,7 @@ from mscan_nodes.save_image import MetascanSaveImage
 from mscan_nodes.load_from_folder import MetascanLoadFromFolder
 from mscan_nodes.load_prompt import MetascanLoadPrompt
 from mscan_nodes.select_prompt import MetascanSelectPrompt
+from mscan_nodes.select_image import MetascanSelectImage
 
 # Import for side effect: registers /metscan/prompts and /metscan/thumbnail
 # routes on PromptServer.instance.routes (no-op if PromptServer isn't
@@ -28,6 +29,7 @@ NODE_CLASS_MAPPINGS = {
     "MetascanLoadFromFolder": MetascanLoadFromFolder,
     "MetascanLoadPrompt": MetascanLoadPrompt,
     "MetascanSelectPrompt": MetascanSelectPrompt,
+    "MetascanSelectImage": MetascanSelectImage,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -36,6 +38,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MetascanLoadFromFolder": "Metascan · Load From Folder",
     "MetascanLoadPrompt": "Metascan · Load Prompt",
     "MetascanSelectPrompt": "Metascan · Select Prompt",
+    "MetascanSelectImage": "Metascan · Select Image",
 }
 
 WEB_DIRECTORY = "./web"

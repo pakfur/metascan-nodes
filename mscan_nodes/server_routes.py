@@ -79,6 +79,52 @@ def fetch_thumbnail_bytes(file_path: str) -> bytes:
     return client.stream_thumbnail_bytes(file_path)
 
 
+# Common still-image extensions metascan can serve. Videos are excluded
+# even when the folder contains them — Select Image is for image input,
+# and bytes_to_tensor only handles still images.
+_IMAGE_EXTS = (
+    ".png", ".jpg", ".jpeg", ".webp", ".gif",
+    ".bmp", ".tif", ".tiff", ".heic", ".heif",
+)
+
+
+def _basename(path: str) -> str:
+    """Last path segment, tolerant of both ``/`` and ``\\`` separators
+    (metascan paths may be Windows-style even when ComfyUI runs under
+    WSL or Linux)."""
+    return path.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _is_image(path: str) -> bool:
+    return path.lower().endswith(_IMAGE_EXTS)
+
+
+def list_images_for_picker(folder: str) -> list[dict]:
+    """Return ``[{"name", "file_path"}, ...]`` for every image-type
+    item in the chosen folder, ordered as metascan returns them.
+
+    Used by MetascanSelectImage's picker. Unlike
+    :func:`list_prompts_for_picker`, this hits ``GET /api/folders/{id}``
+    and walks ``folder.items`` directly — so images that don't have a
+    saved prompt still show up.
+
+    Videos and other non-image items are filtered out by extension
+    (Select Image's downstream is always a still-image decode).
+    """
+    if not folder or folder == OFFLINE_SENTINEL:
+        return []
+
+    client = _build_client()
+    folder_id = _folder_id_for_name(client, folder)
+    folder_detail = client.get_folder(folder_id)
+    items = folder_detail.get("items", []) or []
+    return [
+        {"name": _basename(p), "file_path": p}
+        for p in items
+        if isinstance(p, str) and p and _is_image(p)
+    ]
+
+
 # ---------------------------------------------------------------------------
 # aiohttp shims — registered at import time when PromptServer is available
 # (i.e. running inside ComfyUI, not under pytest).
@@ -105,6 +151,23 @@ async def _handle_list_prompts(request):
         # than 500; the picker just shows an empty state.
         return web.json_response({"prompts": [], "error": str(e)}, status=200)
     return web.json_response({"prompts": rows})
+
+
+async def _handle_list_images(request):
+    from aiohttp import web
+
+    folder = request.rel_url.query.get("folder", "")
+    try:
+        rows = await asyncio.to_thread(list_images_for_picker, folder)
+    except OfflineError as e:
+        return web.json_response({"images": [], "error": str(e)}, status=503)
+    except ApiError as e:
+        return web.json_response({"images": [], "error": e.body_excerpt}, status=502)
+    except RuntimeError as e:
+        # Folder name not found in metascan — return empty rather than
+        # 500, same as the prompts handler.
+        return web.json_response({"images": [], "error": str(e)}, status=200)
+    return web.json_response({"images": rows})
 
 
 async def _handle_thumbnail(request):
@@ -143,6 +206,7 @@ def _register() -> bool:
         return False
     routes = instance.routes
     routes.get("/metscan/prompts")(_handle_list_prompts)
+    routes.get("/metscan/images")(_handle_list_images)
     routes.get("/metscan/thumbnail")(_handle_thumbnail)
     return True
 

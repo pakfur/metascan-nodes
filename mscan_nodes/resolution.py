@@ -1,10 +1,20 @@
-"""Per-model resolution calculator for the load nodes.
+"""Per-model resolution calculator — the canonical shared component.
 
 Given a source image's (width, height), a target diffusion model, and a
 quality tier, return a (target_w, target_h) that:
   1. Obeys the model's divisibility / bucket spec.
   2. Hits the pixel budget for the chosen tier.
   3. Stays as close as possible to the source aspect ratio.
+
+**This is the single source of truth for "given a metascan source image,
+what (W, H) should I generate at?"** Every node that exposes a metascan
+image — directly (Load From Folder, Select Image) or indirectly via a
+saved-prompt's source (Load Prompt, Select Prompt) — calls
+:func:`compute_resolution` through the same ``target_model`` +
+``quality`` widgets. Future video-model rules (frame-aware buckets,
+duration / fps tiers) belong here too: extend ``MODEL_SPECS`` and the
+helper logic rather than spinning up parallel implementations on a
+per-node basis.
 
 Pure module — no HTTP, no torch — so the load nodes can share it and
 unit tests don't need either dependency.

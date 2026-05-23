@@ -107,6 +107,55 @@ def test_list_prompts_empty_folder_returns_empty():
 
 
 # ---------------------------------------------------------------------------
+# list_images_for_picker
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_list_images_returns_folder_items_filtered_to_images(
+    monkeypatch, base_url, folders_payload
+):
+    """Hits GET /api/folders/{id}, walks `items`, and returns
+    {name, file_path} for image-typed paths only. Videos / other
+    extensions are dropped."""
+    clear_cache()
+    respx.get(f"{base_url}/api/folders").mock(
+        return_value=httpx.Response(200, json=folders_payload)
+    )
+    respx.get(f"{base_url}/api/folders/fld_a").mock(
+        return_value=httpx.Response(200, json={
+            "id": "fld_a", "name": "Portraits", "kind": "manual",
+            "items": [
+                "/data/a/img1.png",
+                "/data/a/img2.JPG",  # case-insensitive
+                "/data/a/clip.mp4",  # video — dropped
+                "/data/a/snap.webp",
+                "/data/a/readme.txt",  # non-media — dropped
+                "/data/a/c:\\windows\\path.jpeg",  # Windows path — basename works
+            ],
+        })
+    )
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    rows = server_routes.list_images_for_picker(folder="Portraits")
+    assert rows == [
+        {"name": "img1.png", "file_path": "/data/a/img1.png"},
+        {"name": "img2.JPG", "file_path": "/data/a/img2.JPG"},
+        {"name": "snap.webp", "file_path": "/data/a/snap.webp"},
+        {"name": "path.jpeg", "file_path": "/data/a/c:\\windows\\path.jpeg"},
+    ]
+
+
+def test_list_images_offline_sentinel_returns_empty():
+    """Same short-circuit as list_prompts_for_picker."""
+    assert server_routes.list_images_for_picker(folder=OFFLINE_SENTINEL) == []
+    assert server_routes.list_images_for_picker(folder="") == []
+
+
+# ---------------------------------------------------------------------------
 # fetch_thumbnail_bytes
 # ---------------------------------------------------------------------------
 
