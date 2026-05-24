@@ -120,21 +120,22 @@ def embed_png_metadata(
     In ``if_missing`` mode, skip if either chunk is already present —
     we don't partially overwrite. In ``always`` mode, overwrite both.
     Write via ``.meta.partial`` then ``os.replace`` for the same
-    watcher-safety reason as the relocation step."""
-    img = Image.open(path)
-    # PIL surfaces tEXt chunks in img.info as a plain dict
-    if mode == "if_missing" and ("prompt" in img.info or "workflow" in img.info):
-        img.close()
-        return "skipped_present"
-    info = PngInfo()
-    if prompt is not None:
-        info.add_text("prompt", json.dumps(prompt))
-    if workflow is not None:
-        info.add_text("workflow", json.dumps(workflow))
-    img.load()  # decode pixel data before we close the source file handle
-    staging = path.with_suffix(path.suffix + ".meta.partial")
-    img.save(staging, pnginfo=info, format="PNG")
-    img.close()
+    watcher-safety reason as the relocation step. The ``with`` block
+    ensures the file handle is released even if ``img.save`` raises —
+    important on Windows, where a leaked handle keeps the source file
+    locked."""
+    with Image.open(path) as img:
+        # PIL surfaces tEXt chunks in img.info as a plain dict
+        if mode == "if_missing" and ("prompt" in img.info or "workflow" in img.info):
+            return "skipped_present"
+        info = PngInfo()
+        if prompt is not None:
+            info.add_text("prompt", json.dumps(prompt))
+        if workflow is not None:
+            info.add_text("workflow", json.dumps(workflow))
+        img.load()  # decode pixel data before the context exits
+        staging = path.with_suffix(path.suffix + ".meta.partial")
+        img.save(staging, pnginfo=info, format="PNG")
     os.replace(staging, path)
     return "embedded"
 
