@@ -135,3 +135,20 @@ def test_relocate_file_rejects_unknown_operation(tmp_path):
     dst_dir.mkdir()
     with pytest.raises(ValueError, match="must be 'move' or 'copy'"):
         relocate_file(src, dst_dir, "yeet")
+
+
+def test_relocate_file_first_collision_starts_at_zero(tmp_path):
+    """When the basename collides but no _NN siblings exist, the
+    counter starts at 00."""
+    from mscan_nodes.move_media import relocate_file
+    src = tmp_path / "foo.mp4"
+    src.write_bytes(b"new")
+    dst_dir = tmp_path / "dst"
+    dst_dir.mkdir()
+    (dst_dir / "foo.mp4").write_bytes(b"existing")
+
+    out = relocate_file(src, dst_dir, "move")
+
+    assert out.name == "foo_00.mp4"
+    assert out.read_bytes() == b"new"
+    assert (dst_dir / "foo.mp4").read_bytes() == b"existing"

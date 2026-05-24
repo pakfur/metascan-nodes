@@ -47,7 +47,13 @@ def relocate_file(src: Path, dst_dir: Path, operation: str) -> Path:
 def _pick_final_name(name: str, dst_dir: Path) -> str:
     """Return ``name`` if ``dst_dir / name`` is free; otherwise append
     ``_NN`` using max(existing index for this stem) + 1. Widens to 3
-    digits if 99 is exhausted."""
+    digits if 99 is exhausted.
+
+    For compound extensions (``foo.tar.gz``), the counter is inserted
+    before the final suffix only (``foo.tar_00.gz``), because we use
+    ``Path.stem`` / ``Path.suffix`` which split on the last dot. Accepted
+    in scope because the upstream producers we support (VHS Combine,
+    image savers) only emit single-extension files."""
     target = dst_dir / name
     if not target.exists():
         return name
