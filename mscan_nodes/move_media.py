@@ -8,11 +8,15 @@ into a metascan-watched dir, and best-effort embeds metadata via PIL
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
 from pathlib import Path
 from typing import Optional
+
+from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 
 from mscan_client.cache import combo_directories, OFFLINE_SENTINEL
 from mscan_nodes._shared import _build_client
@@ -72,6 +76,65 @@ def _pick_final_name(name: str, dst_dir: Path) -> str:
     next_idx = max_idx + 1
     width = 2 if next_idx < 100 else 3
     return f"{stem}_{next_idx:0{width}d}{suffix}"
+
+
+_VIDEO_EXTS = frozenset({".mp4", ".mov", ".mkv", ".webm", ".gif"})
+
+
+def dispatch_metadata(
+    path: Path,
+    prompt,
+    workflow,
+    mode: str,
+) -> str:
+    """Route to the per-format embed helper. Returns a status string
+    used by the node's UI text line: ``embedded``, ``skipped_present``,
+    ``skipped_unsupported``, ``skipped_no_ffmpeg``, or ``skipped_error``."""
+    ext = path.suffix.lower()
+    if ext == ".png":
+        return embed_png_metadata(path, prompt, workflow, mode)
+    if ext in _VIDEO_EXTS:
+        return embed_video_metadata(path, prompt, workflow, mode)
+    return "skipped_unsupported"
+
+
+def embed_png_metadata(
+    path: Path,
+    prompt,
+    workflow,
+    mode: str,
+) -> str:
+    """Re-save the PNG at ``path`` with new prompt/workflow tEXt chunks.
+
+    In ``if_missing`` mode, skip if either chunk is already present —
+    we don't partially overwrite. In ``always`` mode, overwrite both.
+    Write via ``.meta.partial`` then ``os.replace`` for the same
+    watcher-safety reason as the relocation step."""
+    img = Image.open(path)
+    existing = dict(img.info)  # PIL surfaces tEXt chunks here
+    if mode == "if_missing" and ("prompt" in existing or "workflow" in existing):
+        img.close()
+        return "skipped_present"
+    info = PngInfo()
+    if prompt is not None:
+        info.add_text("prompt", json.dumps(prompt))
+    if workflow is not None:
+        info.add_text("workflow", json.dumps(workflow))
+    img.load()  # decode pixel data before we close the source file handle
+    staging = path.with_suffix(path.suffix + ".meta.partial")
+    img.save(staging, pnginfo=info, format="PNG")
+    img.close()
+    os.replace(staging, path)
+    return "embedded"
+
+
+def embed_video_metadata(
+    path: Path,
+    prompt,
+    workflow,
+    mode: str,
+) -> str:
+    raise NotImplementedError  # implemented in Task 5
 
 
 class MetascanMoveMedia:

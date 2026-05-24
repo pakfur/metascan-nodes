@@ -152,3 +152,136 @@ def test_relocate_file_first_collision_starts_at_zero(tmp_path):
     assert out.name == "foo_00.mp4"
     assert out.read_bytes() == b"new"
     assert (dst_dir / "foo.mp4").read_bytes() == b"existing"
+
+
+# ----- dispatch_metadata -----
+
+def test_dispatch_metadata_routes_png_to_png_helper(tmp_path, monkeypatch):
+    from mscan_nodes import move_media
+    called = {}
+
+    def fake_png(path, prompt, workflow, mode):
+        called["args"] = (path, prompt, workflow, mode)
+        return "embedded"
+
+    monkeypatch.setattr(move_media, "embed_png_metadata", fake_png)
+    p = tmp_path / "x.png"
+    p.touch()
+
+    out = move_media.dispatch_metadata(p, {"a": 1}, {"w": 2}, "always")
+
+    assert out == "embedded"
+    assert called["args"] == (p, {"a": 1}, {"w": 2}, "always")
+
+
+@pytest.mark.parametrize("ext", [".mp4", ".mov", ".mkv", ".webm", ".gif"])
+def test_dispatch_metadata_routes_video_exts_to_video_helper(tmp_path, monkeypatch, ext):
+    from mscan_nodes import move_media
+    called = {}
+
+    def fake_video(path, prompt, workflow, mode):
+        called["args"] = (path, prompt, workflow, mode)
+        return "embedded"
+
+    monkeypatch.setattr(move_media, "embed_video_metadata", fake_video)
+    p = tmp_path / f"x{ext}"
+    p.touch()
+
+    out = move_media.dispatch_metadata(p, None, None, "if_missing")
+
+    assert out == "embedded"
+    assert called["args"][0] == p
+
+
+def test_dispatch_metadata_unknown_extension_returns_skipped(tmp_path):
+    from mscan_nodes.move_media import dispatch_metadata
+    p = tmp_path / "x.txt"
+    p.touch()
+    assert dispatch_metadata(p, None, None, "always") == "skipped_unsupported"
+
+
+def test_dispatch_metadata_is_case_insensitive(tmp_path, monkeypatch):
+    """A `.MP4` file (uppercase) should still hit the video branch."""
+    from mscan_nodes import move_media
+    monkeypatch.setattr(move_media, "embed_video_metadata", lambda *a, **kw: "embedded")
+    p = tmp_path / "X.MP4"
+    p.touch()
+    assert move_media.dispatch_metadata(p, None, None, "always") == "embedded"
+
+
+# ----- embed_png_metadata -----
+
+import json
+from PIL import Image
+from PIL.PngImagePlugin import PngInfo
+
+
+def _png_with_text(path: Path, **text: str) -> None:
+    info = PngInfo()
+    for k, v in text.items():
+        info.add_text(k, v)
+    Image.new("RGB", (4, 4)).save(path, pnginfo=info)
+
+
+def test_embed_png_metadata_always_overwrites_existing(tmp_path):
+    from mscan_nodes.move_media import embed_png_metadata
+    p = tmp_path / "x.png"
+    _png_with_text(p, prompt='{"old": 1}', workflow='{"old": "w"}')
+
+    out = embed_png_metadata(p, {"new": 2}, {"nodes": []}, "always")
+
+    assert out == "embedded"
+    reread = Image.open(p)
+    reread.load()
+    assert json.loads(reread.info["prompt"]) == {"new": 2}
+    assert json.loads(reread.info["workflow"]) == {"nodes": []}
+
+
+def test_embed_png_metadata_if_missing_skips_when_prompt_present(tmp_path):
+    from mscan_nodes.move_media import embed_png_metadata
+    p = tmp_path / "x.png"
+    _png_with_text(p, prompt='{"keep": 1}')
+
+    out = embed_png_metadata(p, {"new": 2}, {"nodes": []}, "if_missing")
+
+    assert out == "skipped_present"
+    reread = Image.open(p)
+    reread.load()
+    assert json.loads(reread.info["prompt"]) == {"keep": 1}
+    assert "workflow" not in reread.info
+
+
+def test_embed_png_metadata_if_missing_skips_when_only_workflow_present(tmp_path):
+    """A PNG with workflow but no prompt also counts as present — we
+    skip rather than partially overwriting."""
+    from mscan_nodes.move_media import embed_png_metadata
+    p = tmp_path / "x.png"
+    _png_with_text(p, workflow='{"existing": true}')
+
+    out = embed_png_metadata(p, {"p": 1}, {"w": 1}, "if_missing")
+
+    assert out == "skipped_present"
+
+
+def test_embed_png_metadata_if_missing_writes_when_absent(tmp_path):
+    from mscan_nodes.move_media import embed_png_metadata
+    p = tmp_path / "x.png"
+    Image.new("RGB", (4, 4)).save(p)  # no tEXt chunks
+
+    out = embed_png_metadata(p, {"p": 1}, {"w": 2}, "if_missing")
+
+    assert out == "embedded"
+    reread = Image.open(p)
+    reread.load()
+    assert json.loads(reread.info["prompt"]) == {"p": 1}
+    assert json.loads(reread.info["workflow"]) == {"w": 2}
+
+
+def test_embed_png_metadata_no_meta_partial_left(tmp_path):
+    from mscan_nodes.move_media import embed_png_metadata
+    p = tmp_path / "x.png"
+    Image.new("RGB", (4, 4)).save(p)
+
+    embed_png_metadata(p, {"p": 1}, None, "always")
+
+    assert list(tmp_path.glob("*.meta.partial")) == []
