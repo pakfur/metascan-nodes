@@ -87,6 +87,29 @@ def _pick_final_name(name: str, dst_dir: Path) -> str:
 _VIDEO_EXTS = frozenset({".mp4", ".mov", ".mkv", ".webm", ".gif"})
 
 
+def _drop_video_preview_pngs(paths: list[str]) -> list[str]:
+    """Drop ``.png`` entries that share a directory + stem with a video
+    entry in the same list. VHS Combine reports a preview PNG path
+    alongside the saved video, but only the video is actually written to
+    disk — iterating the raw list would fail with 'source not found' on
+    the phantom preview. Stem matching is case-insensitive (Windows
+    filesystems are case-insensitive; PNG suffix can appear as ``.PNG``).
+    Non-PNG entries and PNGs with no sibling video are preserved in
+    original order."""
+    video_keys = set()
+    for p in paths:
+        pp = Path(p)
+        if pp.suffix.lower() in _VIDEO_EXTS:
+            video_keys.add((pp.parent, pp.stem.lower()))
+    out: list[str] = []
+    for p in paths:
+        pp = Path(p)
+        if pp.suffix.lower() == ".png" and (pp.parent, pp.stem.lower()) in video_keys:
+            continue
+        out.append(p)
+    return out
+
+
 def dispatch_metadata(
     path: Path,
     prompt,
@@ -248,7 +271,7 @@ class MetascanMoveMedia:
             )
 
         save_flag, paths = filenames
-        paths = list(paths)
+        paths = _drop_video_preview_pngs(list(paths))
         if not paths:
             logger.debug("MetascanMoveMedia: empty filenames input — nothing to move")
             return {

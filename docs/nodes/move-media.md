@@ -19,6 +19,10 @@ Pair with [Metascan · Save Image](save-image.md): SaveImage handles `IMAGE` ten
 | `operation`     | enum             | `move`        | `move` — source disappears (use when VHS wrote to its temp dir). `copy` — leaves the source in place too.                                  |
 | `save_metadata` | enum             | `if_missing`  | `always` — overwrite container/PNG metadata with the current prompt + workflow. `if_missing` — only write if existing metadata is absent.   |
 
+### VHS preview-PNG filtering
+
+VHS Combine reports a preview PNG path alongside each saved video, but only the video is actually written to disk. Before processing, any `.png` entry that shares a directory + filename stem with a video entry in the same list is dropped — otherwise the node would fail with `source not found` on the phantom preview. Standalone PNGs (no sibling video in the list) are processed normally, so the node still works when the upstream is a plain image saver.
+
 ### Filename collisions
 
 The collision counter is `max(existing index) + 1`, not `len(existing)`. The original basename from the upstream node is preserved when the destination is free; on collision, `_NN` is appended (zero-padded, 2 digits, widening to 3 past 99). A deletion-induced gap in the sequence does not cause us to reuse a name.

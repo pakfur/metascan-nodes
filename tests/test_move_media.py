@@ -602,6 +602,138 @@ def test_process_missing_source_raises_runtime(tmp_path):
         )
 
 
+def test_process_skips_sibling_preview_png_when_video_present(tmp_path, monkeypatch):
+    """VHS Combine emits VHS_FILENAMES like (True, [preview.png, video.mp4])
+    where the preview PNG path is reported but never physically written.
+    Without filtering we hit 'source not found' on the PNG. With filtering,
+    the sibling PNG (same dir + stem as a video in the list) is dropped
+    and the video gets moved; file_path STRING returns the video path."""
+    from mscan_nodes import move_media
+
+    src_dir = tmp_path / "in"
+    src_dir.mkdir()
+    # Only the video physically exists; the PNG sibling is a VHS preview
+    # path that never got written.
+    video = src_dir / "104332_00001.mp4"
+    video.write_bytes(b"video bytes")
+    missing_png = src_dir / "104332_00001.png"
+
+    dst = tmp_path / "out"
+    dst.mkdir()
+
+    # Stub ffmpeg/ffprobe so the video metadata embed succeeds.
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, check, capture_output, timeout):
+        if cmd[0] == "ffprobe":
+            class R:
+                stdout = b'{"format":{"tags":{}}}'
+                stderr = b""
+                returncode = 0
+            return R()
+        Path(cmd[-1]).write_bytes(b"remuxed")
+        class R:
+            stdout = b""
+            stderr = b""
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(move_media.subprocess, "run", fake_run)
+
+    out = move_media.MetascanMoveMedia().process(
+        filenames=(True, [str(missing_png), str(video)]),
+        directory=str(dst),
+        subpath="",
+        operation="move",
+        save_metadata="if_missing",
+        prompt={"p": 1},
+        extra_pnginfo={"workflow": {"nodes": []}},
+    )
+
+    (save_flag, new_paths), file_path = out["result"]
+    assert save_flag is True
+    assert len(new_paths) == 1
+    assert new_paths[0].endswith("104332_00001.mp4")
+    assert file_path == new_paths[0]  # STRING output is the video, not the PNG
+    assert not video.exists()  # actually moved
+
+
+def test_process_keeps_standalone_png_with_no_matching_video(tmp_path):
+    """A PNG with no sibling video in the same list is a real image to
+    move (e.g. user wired in a SaveImage-style upstream). The preview-
+    filter must not eat it."""
+    from mscan_nodes import move_media
+
+    src = tmp_path / "standalone.png"
+    Image.new("RGB", (4, 4)).save(src)
+    dst = tmp_path / "out"
+    dst.mkdir()
+
+    out = move_media.MetascanMoveMedia().process(
+        filenames=(True, [str(src)]),
+        directory=str(dst),
+        subpath="",
+        operation="copy",
+        save_metadata="always",
+        prompt={"p": 1},
+        extra_pnginfo=None,
+    )
+
+    (_, new_paths), file_path = out["result"]
+    assert len(new_paths) == 1
+    assert new_paths[0].endswith("standalone.png")
+    assert file_path == new_paths[0]
+
+
+def test_process_drops_preview_png_only_when_stem_matches_video(tmp_path, monkeypatch):
+    """PNG with a stem that doesn't match any video in the list is kept;
+    only the *sibling* (same parent + stem) is treated as a VHS preview."""
+    from mscan_nodes import move_media
+
+    src_dir = tmp_path / "in"
+    src_dir.mkdir()
+    unrelated_png = src_dir / "screenshot.png"
+    Image.new("RGB", (4, 4)).save(unrelated_png)
+    video = src_dir / "clip.mp4"
+    video.write_bytes(b"v")
+
+    dst = tmp_path / "out"
+    dst.mkdir()
+
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, check, capture_output, timeout):
+        if cmd[0] == "ffprobe":
+            class R:
+                stdout = b'{"format":{"tags":{}}}'
+                stderr = b""
+                returncode = 0
+            return R()
+        Path(cmd[-1]).write_bytes(b"r")
+        class R:
+            stdout = b""
+            stderr = b""
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(move_media.subprocess, "run", fake_run)
+
+    out = move_media.MetascanMoveMedia().process(
+        filenames=(True, [str(unrelated_png), str(video)]),
+        directory=str(dst),
+        subpath="",
+        operation="copy",
+        save_metadata="if_missing",
+        prompt=None,
+        extra_pnginfo=None,
+    )
+
+    (_, new_paths), _ = out["result"]
+    assert len(new_paths) == 2
+    names = sorted(Path(p).name for p in new_paths)
+    assert names == ["clip.mp4", "screenshot.png"]
+
+
 def test_process_translates_source_paths_and_delegates_dest_to_resolver(tmp_path, monkeypatch):
     """process() owns WSL translation for source paths (each entry in
     filenames) but delegates destination translation to
