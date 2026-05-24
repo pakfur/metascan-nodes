@@ -285,3 +285,185 @@ def test_embed_png_metadata_no_meta_partial_left(tmp_path):
     embed_png_metadata(p, {"p": 1}, None, "always")
 
     assert list(tmp_path.glob("*.meta.partial")) == []
+
+
+# ----- embed_video_metadata -----
+
+import subprocess
+
+
+def test_embed_video_metadata_no_ffmpeg_returns_skipped(tmp_path, monkeypatch):
+    from mscan_nodes import move_media
+    p = tmp_path / "x.mp4"
+    p.write_bytes(b"fake video bytes")
+
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: None)
+    # subprocess.run should NOT be called when ffmpeg is missing.
+    monkeypatch.setattr(
+        move_media.subprocess, "run",
+        lambda *a, **kw: pytest.fail("subprocess.run called despite missing ffmpeg"),
+    )
+
+    out = move_media.embed_video_metadata(p, {"p": 1}, {"w": 2}, "always")
+
+    assert out == "skipped_no_ffmpeg"
+    assert p.read_bytes() == b"fake video bytes"  # untouched
+
+
+def test_embed_video_metadata_always_invokes_ffmpeg(tmp_path, monkeypatch):
+    """Always mode should shell out to ffmpeg with -c copy and -metadata,
+    then os.replace the staging file over the original."""
+    from mscan_nodes import move_media
+    p = tmp_path / "x.mp4"
+    p.write_bytes(b"original")
+    recorded = {}
+
+    def fake_run(cmd, check, capture_output, timeout):
+        recorded["cmd"] = cmd
+        # Simulate ffmpeg writing the staging file
+        Path(cmd[-1]).write_bytes(b"remuxed")
+        class R:
+            returncode = 0
+            stdout = b""
+            stderr = b""
+        return R()
+
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(move_media.subprocess, "run", fake_run)
+
+    out = move_media.embed_video_metadata(p, {"p": 1}, {"w": 2}, "always")
+
+    assert out == "embedded"
+    assert recorded["cmd"][:6] == ["ffmpeg", "-y", "-loglevel", "error", "-i", str(p)]
+    assert "-c" in recorded["cmd"] and "copy" in recorded["cmd"]
+    # The -metadata arg should carry our JSON payload
+    meta_idx = recorded["cmd"].index("-metadata")
+    assert recorded["cmd"][meta_idx + 1].startswith("comment=")
+    assert '"prompt"' in recorded["cmd"][meta_idx + 1]
+    # Original file should now have the "remuxed" bytes (os.replace ran).
+    assert p.read_bytes() == b"remuxed"
+
+
+def test_embed_video_metadata_ffmpeg_nonzero_logs_and_skips(tmp_path, monkeypatch):
+    from mscan_nodes import move_media
+    p = tmp_path / "x.mp4"
+    p.write_bytes(b"original")
+
+    def fake_run(cmd, check, capture_output, timeout):
+        # Create the staging file so we can verify it gets cleaned up
+        Path(cmd[-1]).write_bytes(b"half-written")
+        raise subprocess.CalledProcessError(
+            returncode=1, cmd=cmd, output=b"", stderr=b"ffmpeg blew up"
+        )
+
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(move_media.subprocess, "run", fake_run)
+
+    out = move_media.embed_video_metadata(p, {"p": 1}, None, "always")
+
+    assert out == "skipped_error"
+    assert p.read_bytes() == b"original"  # original survives
+    assert not (tmp_path / "x.mp4.meta.partial").exists()  # staging cleaned up
+
+
+def test_embed_video_metadata_if_missing_probes_first_and_skips(tmp_path, monkeypatch):
+    from mscan_nodes import move_media
+    p = tmp_path / "x.mp4"
+    p.write_bytes(b"original")
+
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(move_media, "_video_has_metadata", lambda path: True)
+    monkeypatch.setattr(
+        move_media.subprocess, "run",
+        lambda *a, **kw: pytest.fail("ffmpeg should not run when metadata present"),
+    )
+
+    out = move_media.embed_video_metadata(p, {"p": 1}, None, "if_missing")
+
+    assert out == "skipped_present"
+    assert p.read_bytes() == b"original"
+
+
+def test_embed_video_metadata_if_missing_writes_when_absent(tmp_path, monkeypatch):
+    from mscan_nodes import move_media
+    p = tmp_path / "x.mp4"
+    p.write_bytes(b"original")
+
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(move_media, "_video_has_metadata", lambda path: False)
+
+    def fake_run(cmd, check, capture_output, timeout):
+        Path(cmd[-1]).write_bytes(b"remuxed")
+        class R:
+            stdout = b""
+            stderr = b""
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(move_media.subprocess, "run", fake_run)
+
+    out = move_media.embed_video_metadata(p, {"p": 1}, None, "if_missing")
+
+    assert out == "embedded"
+    assert p.read_bytes() == b"remuxed"
+
+
+def test_video_has_metadata_returns_false_when_ffprobe_missing(tmp_path, monkeypatch):
+    from mscan_nodes import move_media
+    p = tmp_path / "x.mp4"
+    p.write_bytes(b"x")
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: None)
+    assert move_media._video_has_metadata(p) is False
+
+
+def test_video_has_metadata_true_when_comment_tag_present(tmp_path, monkeypatch):
+    from mscan_nodes import move_media
+    p = tmp_path / "x.mp4"
+    p.write_bytes(b"x")
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, check, capture_output, timeout):
+        class R:
+            stdout = json.dumps({"format": {"tags": {"comment": "blah"}}}).encode()
+            stderr = b""
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(move_media.subprocess, "run", fake_run)
+    assert move_media._video_has_metadata(p) is True
+
+
+def test_video_has_metadata_false_when_no_matching_tags(tmp_path, monkeypatch):
+    from mscan_nodes import move_media
+    p = tmp_path / "x.mp4"
+    p.write_bytes(b"x")
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, check, capture_output, timeout):
+        class R:
+            stdout = json.dumps({"format": {"tags": {"title": "movie"}}}).encode()
+            stderr = b""
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(move_media.subprocess, "run", fake_run)
+    assert move_media._video_has_metadata(p) is False
+
+
+def test_video_has_metadata_case_insensitive(tmp_path, monkeypatch):
+    """Container tags can be uppercase (Matroska uses TITLE/COMMENT);
+    match case-insensitively."""
+    from mscan_nodes import move_media
+    p = tmp_path / "x.mkv"
+    p.write_bytes(b"x")
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, check, capture_output, timeout):
+        class R:
+            stdout = json.dumps({"format": {"tags": {"COMMENT": "blah"}}}).encode()
+            stderr = b""
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(move_media.subprocess, "run", fake_run)
+    assert move_media._video_has_metadata(p) is True

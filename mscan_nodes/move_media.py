@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -139,7 +140,64 @@ def embed_video_metadata(
     workflow,
     mode: str,
 ) -> str:
-    raise NotImplementedError  # implemented in Task 5
+    """Re-mux ``path`` with new comment metadata via ffmpeg ``-c copy``.
+
+    Best-effort: if ffmpeg is missing or fails, the file is left
+    untouched and we return a status the caller can surface in the UI.
+    The comment payload is JSON of ``{"prompt": ..., "workflow": ...}``,
+    matching the key VHS itself writes."""
+    if shutil.which("ffmpeg") is None:
+        logger.warning("ffmpeg not found on PATH — skipping metadata embed for %s", path)
+        return "skipped_no_ffmpeg"
+    if mode == "if_missing" and _video_has_metadata(path):
+        return "skipped_present"
+    payload = json.dumps({"prompt": prompt, "workflow": workflow})
+    staging = path.with_suffix(path.suffix + ".meta.partial")
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", str(path),
+        "-c", "copy",
+        "-metadata", f"comment={payload}",
+        str(staging),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=60)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        logger.warning("ffmpeg metadata embed failed for %s: %s", path, _tail_stderr(exc))
+        try:
+            staging.unlink()
+        except FileNotFoundError:
+            pass
+        return "skipped_error"
+    os.replace(staging, path)
+    return "embedded"
+
+
+def _video_has_metadata(path: Path) -> bool:
+    """Return True iff ffprobe sees any of comment/prompt/workflow in
+    the file's format-level tags. Treat ffprobe-missing as 'no metadata
+    detected' — the ffmpeg-missing check above prevents us from writing
+    in that case anyway."""
+    if shutil.which("ffprobe") is None:
+        return False
+    cmd = ["ffprobe", "-v", "error", "-show_format", "-of", "json", str(path)]
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, timeout=30)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
+    try:
+        tags = json.loads(result.stdout).get("format", {}).get("tags", {}) or {}
+    except json.JSONDecodeError:
+        return False
+    lowered = {k.lower() for k in tags.keys()}
+    return bool(lowered & {"comment", "prompt", "workflow"})
+
+
+def _tail_stderr(exc) -> str:
+    stderr = getattr(exc, "stderr", b"") or b""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    return stderr[-500:]
 
 
 class MetascanMoveMedia:
