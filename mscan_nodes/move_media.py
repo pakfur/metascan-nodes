@@ -164,10 +164,7 @@ def embed_video_metadata(
         subprocess.run(cmd, check=True, capture_output=True, timeout=60)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         logger.warning("ffmpeg metadata embed failed for %s: %s", path, _tail_stderr(exc))
-        try:
-            staging.unlink()
-        except FileNotFoundError:
-            pass
+        staging.unlink(missing_ok=True)
         return "skipped_error"
     os.replace(staging, path)
     return "embedded"

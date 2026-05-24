@@ -6,6 +6,7 @@ end-to-end with the shared respx/conftest fixtures."""
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -289,8 +290,6 @@ def test_embed_png_metadata_no_meta_partial_left(tmp_path):
 
 # ----- embed_video_metadata -----
 
-import subprocess
-
 
 def test_embed_video_metadata_no_ffmpeg_returns_skipped(tmp_path, monkeypatch):
     from mscan_nodes import move_media
@@ -364,6 +363,28 @@ def test_embed_video_metadata_ffmpeg_nonzero_logs_and_skips(tmp_path, monkeypatc
     assert out == "skipped_error"
     assert p.read_bytes() == b"original"  # original survives
     assert not (tmp_path / "x.mp4.meta.partial").exists()  # staging cleaned up
+
+
+def test_embed_video_metadata_timeout_logs_and_cleans_staging(tmp_path, monkeypatch):
+    """TimeoutExpired path mirrors the CalledProcessError path: staging
+    cleaned up, original untouched, returns skipped_error."""
+    from mscan_nodes import move_media
+    p = tmp_path / "x.mp4"
+    p.write_bytes(b"original")
+
+    def fake_run(cmd, check, capture_output, timeout):
+        # ffmpeg may have written some bytes before the timeout fired
+        Path(cmd[-1]).write_bytes(b"partial")
+        raise subprocess.TimeoutExpired(cmd, timeout, stderr=b"timed out")
+
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(move_media.subprocess, "run", fake_run)
+
+    out = move_media.embed_video_metadata(p, {"p": 1}, None, "always")
+
+    assert out == "skipped_error"
+    assert p.read_bytes() == b"original"
+    assert not (tmp_path / "x.mp4.meta.partial").exists()
 
 
 def test_embed_video_metadata_if_missing_probes_first_and_skips(tmp_path, monkeypatch):
