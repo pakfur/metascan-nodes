@@ -749,3 +749,44 @@ def test_video_has_metadata_case_insensitive(tmp_path, monkeypatch):
 
     monkeypatch.setattr(move_media.subprocess, "run", fake_run)
     assert move_media._video_has_metadata(p) is True
+
+
+# ----- INPUT_TYPES dropdown -----
+
+import respx
+import httpx
+from mscan_client.cache import clear_cache
+
+
+@respx.mock
+def test_input_types_lists_directories_from_metascan(monkeypatch, base_url, config_payload):
+    """INPUT_TYPES() hits combo_directories() which hits the real
+    client which respx mocks here. Same pattern as SaveImage."""
+    from mscan_nodes.move_media import MetascanMoveMedia
+    clear_cache()
+    respx.get(f"{base_url}/api/config").mock(return_value=httpx.Response(200, json=config_payload))
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    spec = MetascanMoveMedia.INPUT_TYPES()
+    dirs = spec["required"]["directory"][0]
+    assert "/data/comfy-out" in dirs
+    assert "/data/photos" in dirs
+
+
+@respx.mock
+def test_input_types_shows_offline_sentinel_when_server_down(monkeypatch, base_url):
+    from mscan_nodes.move_media import MetascanMoveMedia
+    from mscan_client.cache import OFFLINE_SENTINEL
+    clear_cache()
+    respx.get(f"{base_url}/api/config").mock(side_effect=httpx.ConnectError("x"))
+    monkeypatch.setenv("METASCAN_URL", base_url)
+    monkeypatch.delenv("METASCAN_API_KEY", raising=False)
+    import mscan_nodes.settings
+    mscan_nodes.settings._OVERRIDE = None
+
+    spec = MetascanMoveMedia.INPUT_TYPES()
+    dirs = spec["required"]["directory"][0]
+    assert dirs == [OFFLINE_SENTINEL]
