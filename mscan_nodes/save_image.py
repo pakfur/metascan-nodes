@@ -1,18 +1,12 @@
 """MetascanSaveImage — writes PNG batches into a metascan-watched dir.
 
-This module is split into two layers. The pure helpers
-(``resolve_target_dir``, ``tensor_to_pil``, ``build_png_info``) handle
-filesystem-path + PIL plumbing and are fully testable with synthesized
-torch tensors. The ``MetascanSaveImage`` class (added in Task 14) wires
-the helpers into ComfyUI's node interface.
-"""
+Filesystem and clock helpers live in mscan_nodes._shared so MoveMedia
+can reuse them. This module owns the PIL/torch glue (``tensor_to_pil``,
+``build_png_info``) and the node class itself."""
 
 from __future__ import annotations
 
-import datetime as dt
 import json
-import re
-import sys
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
@@ -21,41 +15,16 @@ import torch
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
-
-_WSL_MNT_RE = re.compile(r"^/mnt/([a-zA-Z])(/.*)?$")
-
-
-def wsl_to_native_path(path: str) -> str:
-    """Translate WSL ``/mnt/<drive>/...`` paths to Windows ``<DRIVE>:\\...``
-    when running on Windows. No-op on Linux/macOS and for paths that
-    aren't WSL-style mounts. Needed when metascan runs in WSL (and
-    therefore reports watched directories as ``/mnt/d/...``) but the
-    ComfyUI process consuming those paths is on the Windows side."""
-    if sys.platform != "win32":
-        return path
-    m = _WSL_MNT_RE.match(path)
-    if not m:
-        return path
-    drive = m.group(1).upper()
-    rest = m.group(2) or "\\"
-    return f"{drive}:{rest}".replace("/", "\\")
-
-
-def resolve_target_dir(directory: str, subpath: str, now: dt.datetime) -> Path:
-    """Return ``Path(directory) / strftime(subpath, now)``, creating the
-    directory tree if it doesn't exist. ``subpath`` may include strftime
-    placeholders like ``%Y-%m``; an empty subpath returns ``directory``
-    unchanged. WSL-style mounts (``/mnt/<drive>/...``) are translated to
-    native Windows form first so ComfyUI on Windows can write to dirs
-    that metascan-in-WSL reports."""
-    base = Path(wsl_to_native_path(directory))
-    if subpath:
-        expanded = now.strftime(subpath)
-        target = base / expanded
-    else:
-        target = base
-    target.mkdir(parents=True, exist_ok=True)
-    return target
+# Re-export the helpers from _shared so existing imports
+# ``from mscan_nodes.save_image import wsl_to_native_path`` (used by
+# tests/test_save_image.py) keep working unchanged.
+from mscan_nodes._shared import (
+    wsl_to_native_path,
+    resolve_target_dir,
+    _utc_now,
+    _build_client,
+    _comfy_temp_dir,
+)
 
 
 def tensor_to_pil(image: torch.Tensor) -> Image.Image:
@@ -72,9 +41,7 @@ def tensor_to_pil(image: torch.Tensor) -> Image.Image:
 def build_png_info(prompt: Optional[dict], workflow: Optional[dict]) -> PngInfo:
     """Build a ``PngInfo`` carrying ComfyUI's ``prompt`` and (optionally)
     ``workflow`` tEXt chunks. The format matches what ComfyUI's core
-    SaveImage writes, which is what metascan's enhanced_comfyui extractor
-    expects when it scans the directory later (see
-    metascan/metascan/extractors/enhanced_comfyui.py)."""
+    SaveImage writes."""
     info = PngInfo()
     if prompt is not None:
         info.add_text("prompt", json.dumps(prompt))
@@ -85,31 +52,7 @@ def build_png_info(prompt: Optional[dict], workflow: Optional[dict]) -> PngInfo:
 
 # --- ComfyUI node integration --------------------------------------------
 
-from mscan_client.api import MetascanClient
 from mscan_client.cache import combo_directories, OFFLINE_SENTINEL
-from mscan_client.config import resolve_config
-from mscan_nodes.settings import get_current_override
-
-
-def _utc_now() -> dt.datetime:
-    """Indirection so tests can patch the clock for strftime checks."""
-    return dt.datetime.now()
-
-
-def _build_client() -> MetascanClient:
-    cfg = resolve_config(settings_override=get_current_override())
-    return MetascanClient(config=cfg, timeout=5.0)
-
-
-def _comfy_temp_dir() -> Optional[Path]:
-    """Return ComfyUI's temp directory, or None if we're not running under
-    ComfyUI (tests, scripts). The preview-image side of save() is skipped
-    when this is None."""
-    try:
-        import folder_paths  # ComfyUI puts its root on sys.path
-        return Path(folder_paths.get_temp_directory())
-    except Exception:  # noqa: BLE001 — any failure means no UI preview
-        return None
 
 
 def _write_previews(
