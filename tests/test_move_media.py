@@ -472,6 +472,23 @@ def test_process_empty_filenames_returns_empty_and_no_error(tmp_path):
     assert out["ui"]["text"]  # at least one line — the "no files" debug line
 
 
+def test_process_empty_filenames_preserves_save_flag_false(tmp_path):
+    """The empty-input short-circuit must pass save_flag through too,
+    not hardcode it. Regression guard against a future 'simplification'
+    that hardcodes True."""
+    from mscan_nodes.move_media import MetascanMoveMedia
+    out = MetascanMoveMedia().process(
+        filenames=(False, []),
+        directory=str(tmp_path),
+        subpath="",
+        operation="move",
+        save_metadata="if_missing",
+        prompt=None,
+        extra_pnginfo=None,
+    )
+    assert out["result"][0] == (False, [])
+
+
 def test_process_move_pipeline_end_to_end(tmp_path, monkeypatch):
     """Real filesystem move into a real metascan dir + mocked ffmpeg
     re-mux. Asserts the file lands, source disappears, returned
@@ -585,10 +602,14 @@ def test_process_missing_source_raises_runtime(tmp_path):
         )
 
 
-def test_process_wsl_translation_on_source_and_destination(tmp_path, monkeypatch):
-    """When sys.platform is win32 and either the directory or a source
-    path comes in as /mnt/<drive>/..., both get translated through
-    wsl_to_native_path before the filesystem call."""
+def test_process_translates_source_paths_and_delegates_dest_to_resolver(tmp_path, monkeypatch):
+    """process() owns WSL translation for source paths (each entry in
+    filenames) but delegates destination translation to
+    resolve_target_dir (in _shared). This test verifies the source
+    paths go through wsl_to_native_path and that the raw directory
+    string is handed to resolve_target_dir unmodified — destination
+    translation itself is tested by tests/test_save_image.py against
+    resolve_target_dir directly."""
     from mscan_nodes import move_media
     monkeypatch.setattr("sys.platform", "win32")
 
