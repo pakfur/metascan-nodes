@@ -65,6 +65,13 @@ def test_input_types_offline_returns_sentinel_for_folder(monkeypatch, base_url):
     assert spec["required"]["folder"][0] == [OFFLINE_SENTINEL]
     target_models = spec["required"]["target_model"][0]
     assert target_models[-1] == "any"
+    # Select Image is the I2V entry point — wan/ltx2 must appear here,
+    # inserted before the trailing "any" so the dropdown still ends in
+    # the virtual fallback.
+    assert "wan" in target_models
+    assert "ltx2" in target_models
+    assert target_models.index("wan") < target_models.index("any")
+    assert target_models.index("ltx2") < target_models.index("any")
     for key in ("image_name", "source_file_path", "quality"):
         assert key in spec["required"]
     # No editable prompt widgets on this node.

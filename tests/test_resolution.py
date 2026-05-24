@@ -8,6 +8,7 @@ import math
 import pytest
 
 from mscan_nodes.resolution import (
+    I2V_MODELS_FOR_RES,
     MODEL_SPECS,
     QUALITY_TIERS,
     TARGET_MODELS_FOR_RES,
@@ -244,6 +245,97 @@ def test_compute_resolution_rejects_nonpositive_source():
         compute_resolution(0, 1024, "sd", "Balanced")
     with pytest.raises(ValueError):
         compute_resolution(1024, -1, "sd", "Balanced")
+
+
+# ----- I2V models (wan, ltx2) -----
+
+def test_i2v_models_are_registered():
+    """I2V_MODELS_FOR_RES entries must have full ModelSpec entries —
+    Select Image surfaces them in its dropdown so an unknown-model
+    fallback would silently mis-size video latents."""
+    for model in I2V_MODELS_FOR_RES:
+        assert model in MODEL_SPECS, f"{model} missing from MODEL_SPECS"
+
+
+@pytest.mark.parametrize("model,quality", [
+    (m, q) for m in I2V_MODELS_FOR_RES for q in QUALITY_TIERS
+])
+def test_i2v_compute_resolution_obeys_divisor(model, quality):
+    w, h = compute_resolution(1920, 1080, model, quality)
+    divisor = MODEL_SPECS[model].divisor
+    assert w % divisor == 0, f"{model}/{quality}: {w} not divisible by {divisor}"
+    assert h % divisor == 0, f"{model}/{quality}: {h} not divisible by {divisor}"
+
+
+@pytest.mark.parametrize("model,quality", [
+    (m, q) for m in I2V_MODELS_FOR_RES for q in QUALITY_TIERS
+])
+def test_i2v_compute_resolution_preserves_orientation(model, quality):
+    w_land, h_land = compute_resolution(1920, 1080, model, quality)
+    assert w_land >= h_land, f"{model}/{quality} flipped landscape"
+    w_port, h_port = compute_resolution(1080, 1920, model, quality)
+    assert h_port >= w_port, f"{model}/{quality} flipped portrait"
+
+
+@pytest.mark.parametrize("model,quality", [
+    (m, q) for m in I2V_MODELS_FOR_RES for q in QUALITY_TIERS
+])
+def test_i2v_every_tier_has_buckets(model, quality):
+    """Video models are bucket-only — every tier must list buckets so
+    we never silently fall through to compute_from_aspect."""
+    assert MODEL_SPECS[model].tier_buckets.get(quality), (
+        f"{model}/{quality} has no buckets defined"
+    )
+
+
+def test_wan_fast_landscape_picks_native_480p_bucket():
+    """Wan was trained on 832x480 / 480x832 at 480p — a 16:9 landscape
+    source on the Fast tier must land on that exact native bucket."""
+    assert compute_resolution(1920, 1080, "wan", "Fast") == (832, 480)
+
+
+def test_wan_balanced_landscape_picks_native_720p_bucket():
+    """Wan native 720p is 1280x720 — Balanced tier on a 16:9 source
+    must hit that bucket, not a computed off-grid size."""
+    assert compute_resolution(1920, 1080, "wan", "Balanced") == (1280, 720)
+
+
+def test_wan_balanced_portrait_picks_native_720p_portrait():
+    assert compute_resolution(1080, 1920, "wan", "Balanced") == (720, 1280)
+
+
+def test_wan_square_source_picks_square_bucket():
+    """Wan Balanced should map a square source to its 960x960 bucket
+    rather than skewing toward the 16:9 default."""
+    assert compute_resolution(1024, 1024, "wan", "Balanced") == (960, 960)
+
+
+def test_ltx2_fast_3_2_source_picks_native_768x512():
+    """LTX-Video native is 768x512 (3:2) — a 3:2 source on Fast must
+    hit the native bucket."""
+    assert compute_resolution(1536, 1024, "ltx2", "Fast") == (768, 512)
+
+
+def test_ltx2_balanced_landscape_picks_16_9_bucket():
+    """LTX2 Balanced 16:9 landscape → 1024x576."""
+    assert compute_resolution(1920, 1080, "ltx2", "Balanced") == (1024, 576)
+
+
+def test_ltx2_ultra_landscape_approaches_1080p():
+    """LTX2 Ultra is the 1080p-class tier — 16:9 source must land on
+    1920x1088 (closest 32-divisible to true 1080p)."""
+    assert compute_resolution(1920, 1080, "ltx2", "Ultra") == (1920, 1088)
+
+
+def test_i2v_tier_pixels_increase_monotonically():
+    """Higher tiers must allocate at least as many pixels as lower
+    tiers — otherwise the UI promise of 'better' tiers is a lie."""
+    for model in I2V_MODELS_FOR_RES:
+        pixels = [MODEL_SPECS[model].tier_pixels[t] for t in QUALITY_TIERS]
+        for prev, nxt in zip(pixels, pixels[1:]):
+            assert prev <= nxt, (
+                f"{model} tier pixels not monotonic: {pixels}"
+            )
 
 
 # ----- pixel-budget reasonableness sanity check -----

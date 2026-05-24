@@ -33,6 +33,12 @@ TARGET_MODELS_FOR_RES: list[str] = [
     "sd", "pony", "flux1", "flux2", "zimage", "chroma", "qwen", "any",
 ]
 
+# I2V video models. Surfaced only by Select Image (the I2V entry point);
+# the prompt-oriented nodes don't expose them because metascan's saved
+# prompts are scoped to image models. Tiers map to spatial buckets here
+# — temporal (frame count / fps) is left for the sampler to decide.
+I2V_MODELS_FOR_RES: list[str] = ["wan", "ltx2"]
+
 
 @dataclass(frozen=True)
 class ModelSpec:
@@ -81,6 +87,83 @@ _ZIMAGE_1280_BUCKETS: list[tuple[int, int]] = [
     (1680, 720), (720, 1680),
 ]
 
+# Wan 2.1 / Wan 2.2 I2V buckets. Both share spatial constraints: VAE
+# spatial compression 8 + 2x2 patching → multiples of 16. The model was
+# trained on 480p and 720p only (16:9 / 9:16 pairs), so Fast and
+# Balanced anchor on those native pairs and add square / 4:3 buckets
+# for source aspects the picker might throw at it. High and Ultra
+# extrapolate past training resolution — quality may degrade but the
+# math still produces grid-aligned dims.
+_WAN_FAST_BUCKETS: list[tuple[int, int]] = [
+    (832, 480),   # 16:9 (native 480p)
+    (480, 832),   # 9:16 (native 480p)
+    (624, 624),   # 1:1
+    (720, 544),   # 4:3
+    (544, 720),   # 3:4
+    (768, 512),   # 3:2
+    (512, 768),   # 2:3
+]
+_WAN_BALANCED_BUCKETS: list[tuple[int, int]] = [
+    (1280, 720),  # 16:9 (native 720p)
+    (720, 1280),  # 9:16 (native 720p)
+    (960, 960),   # 1:1
+    (1104, 832),  # 4:3
+    (832, 1104),  # 3:4
+    (1024, 768),  # 4:3 alt
+    (768, 1024),
+]
+_WAN_HIGH_BUCKETS: list[tuple[int, int]] = [
+    (1536, 864),  # 16:9
+    (864, 1536),  # 9:16
+    (1152, 1152), # 1:1
+    (1328, 992),  # 4:3
+    (992, 1328),
+]
+_WAN_ULTRA_BUCKETS: list[tuple[int, int]] = [
+    (1920, 1088), # ~16:9 (close to 1080p, divisible by 16)
+    (1088, 1920),
+    (1280, 1280), # 1:1
+    (1472, 1104), # 4:3
+    (1104, 1472),
+]
+
+# LTX-Video / LTX2 buckets. The Lightricks VAE compresses 32x spatially
+# so all dims must be multiples of 32. Native LTX-Video training res is
+# 768x512 (3:2); LTX2 extends the practical ceiling toward 1080p. Each
+# tier covers the common aspects (1:1, 16:9, 9:16, 4:3, 3:4).
+_LTX2_FAST_BUCKETS: list[tuple[int, int]] = [
+    (768, 512),   # 3:2 (native)
+    (512, 768),   # 2:3
+    (640, 640),   # 1:1
+    (704, 384),   # ~16:9
+    (384, 704),
+    (704, 544),   # ~4:3
+    (544, 704),
+]
+_LTX2_BALANCED_BUCKETS: list[tuple[int, int]] = [
+    (1024, 576),  # 16:9
+    (576, 1024),  # 9:16
+    (768, 768),   # 1:1
+    (896, 672),   # 4:3
+    (672, 896),
+    (1024, 704),  # 3:2 ish
+    (704, 1024),
+]
+_LTX2_HIGH_BUCKETS: list[tuple[int, int]] = [
+    (1280, 704),  # ~16:9
+    (704, 1280),
+    (960, 960),   # 1:1
+    (1152, 864),  # 4:3
+    (864, 1152),
+]
+_LTX2_ULTRA_BUCKETS: list[tuple[int, int]] = [
+    (1920, 1088), # ~16:9 (close to 1080p)
+    (1088, 1920),
+    (1280, 1280), # 1:1
+    (1472, 1120), # ~4:3
+    (1120, 1472),
+]
+
 
 # --- model spec table -----------------------------------------------------
 
@@ -109,6 +192,35 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         tier_buckets={"Balanced": _QWEN_BALANCED_BUCKETS},
     ),
     "any":    ModelSpec(divisor=16, tier_pixels=_FLUX_LIKE_TIERS),
+    # I2V video models — bucket-only across all four tiers because video
+    # models have strict aspect/resolution training sets and off-bucket
+    # sizes degrade more visibly than for image models.
+    "wan": ModelSpec(
+        divisor=16,
+        tier_pixels={
+            "Fast": 832*480, "Balanced": 1280*720,
+            "High": 1536*864, "Ultra": 1920*1088,
+        },
+        tier_buckets={
+            "Fast": _WAN_FAST_BUCKETS,
+            "Balanced": _WAN_BALANCED_BUCKETS,
+            "High": _WAN_HIGH_BUCKETS,
+            "Ultra": _WAN_ULTRA_BUCKETS,
+        },
+    ),
+    "ltx2": ModelSpec(
+        divisor=32,
+        tier_pixels={
+            "Fast": 768*512, "Balanced": 1024*576,
+            "High": 1280*704, "Ultra": 1920*1088,
+        },
+        tier_buckets={
+            "Fast": _LTX2_FAST_BUCKETS,
+            "Balanced": _LTX2_BALANCED_BUCKETS,
+            "High": _LTX2_HIGH_BUCKETS,
+            "Ultra": _LTX2_ULTRA_BUCKETS,
+        },
+    ),
 }
 
 

@@ -29,7 +29,7 @@ from mscan_client.cache import (
 )
 from mscan_nodes.load_from_folder import bytes_to_tensor
 from mscan_nodes.load_prompt import _build_client
-from mscan_nodes.resolution import QUALITY_TIERS, compute_resolution
+from mscan_nodes.resolution import I2V_MODELS_FOR_RES, QUALITY_TIERS, compute_resolution
 
 
 class MetascanSelectImage:
@@ -52,6 +52,12 @@ class MetascanSelectImage:
         except Exception:  # noqa: BLE001
             folders = [OFFLINE_SENTINEL]
             target_models = [OFFLINE_SENTINEL]
+        # I2V models (wan, ltx2) are surfaced ONLY on this node — the
+        # other load nodes are prompt-oriented and metascan's saved
+        # prompts are scoped to image models. Insert before the trailing
+        # "any" so the virtual fallback stays at the end of the list.
+        if target_models and target_models[-1] == "any":
+            target_models = target_models[:-1] + I2V_MODELS_FOR_RES + ["any"]
         return {
             "required": {
                 "folder": (folders,),
