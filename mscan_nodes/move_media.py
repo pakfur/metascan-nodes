@@ -89,7 +89,12 @@ def dispatch_metadata(
 ) -> str:
     """Route to the per-format embed helper. Returns a status string
     used by the node's UI text line: ``embedded``, ``skipped_present``,
-    ``skipped_unsupported``, ``skipped_no_ffmpeg``, or ``skipped_error``."""
+    ``skipped_unsupported``, ``skipped_no_ffmpeg``, or ``skipped_error``.
+
+    Dispatch is by lowercased ``path.suffix``:
+    - ``.png`` → ``embed_png_metadata`` (PIL tEXt chunks)
+    - any extension in ``_VIDEO_EXTS`` → ``embed_video_metadata`` (ffmpeg ``-c copy``)
+    - anything else → ``"skipped_unsupported"``"""
     ext = path.suffix.lower()
     if ext == ".png":
         return embed_png_metadata(path, prompt, workflow, mode)
@@ -111,8 +116,8 @@ def embed_png_metadata(
     Write via ``.meta.partial`` then ``os.replace`` for the same
     watcher-safety reason as the relocation step."""
     img = Image.open(path)
-    existing = dict(img.info)  # PIL surfaces tEXt chunks here
-    if mode == "if_missing" and ("prompt" in existing or "workflow" in existing):
+    # PIL surfaces tEXt chunks in img.info as a plain dict
+    if mode == "if_missing" and ("prompt" in img.info or "workflow" in img.info):
         img.close()
         return "skipped_present"
     info = PngInfo()
