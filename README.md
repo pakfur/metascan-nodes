@@ -2,12 +2,15 @@
 
 ComfyUI custom nodes for the [metascan](https://github.com/pakfur/metascan) AI media browser.
 
-Four nodes:
+Seven nodes:
 
 - **[Metascan · Save Image](docs/nodes/save-image.md)** — write a PNG batch into a metascan-watched directory. Metascan's filesystem watcher picks the file up on its own; no API call at save time.
 - **[Metascan · Load From Folder](docs/nodes/load-from-folder.md)** — load a random / sequential / specific image from a metascan manual folder, with extracted prompts and a model-aware recommended `(width, height)` as bonus outputs.
 - **[Metascan · Load Prompt](docs/nodes/load-prompt.md)** — load a saved prompt from metascan's prompt library plus its source image and recommended resolution. Supports per-instance caching so you can sweep quality tiers without re-fetching.
 - **[Metascan · Settings](docs/nodes/settings.md)** — sentinel node for overriding URL / API key per workflow.
+- **[Metascan · Select Prompt](docs/nodes/select-prompt.md)** — visual prompt picker that lists saved prompts from metascan's library for click-to-select.
+- **[Metascan · Select Image](docs/nodes/select-image.md)** — visual image picker that surfaces a metascan folder's images for click-to-select inside the workflow editor.
+- **[Metascan · Move Media](docs/nodes/move-media.md)** — relocate a media file produced upstream (e.g. by VHS Combine Video) into a metascan-watched directory and embed prompt/workflow metadata. Works with anything that emits `VHS_FILENAMES`. ffmpeg required for video metadata; relocation still succeeds without it.
 
 See the per-node docs above for inputs, outputs, errors, and the model-specific resolution rules.
 
@@ -43,7 +46,7 @@ pip install httpx pillow numpy
 
 ### After installing
 
-Restart ComfyUI. The four nodes appear under the `metascan` category.
+Restart ComfyUI. The nodes appear under the `metascan` category.
 
 ## Configure
 
