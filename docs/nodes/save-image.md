@@ -2,6 +2,8 @@
 
 Save a batch of generated images into a directory metascan is already watching. Metascan's filesystem watcher (or its next manual scan) picks the file up automatically and indexes it — no API call happens at save time.
 
+**See also:** For files already on disk (e.g. VHS Combine Video output), use [Metascan · Move Media](move-media.md).
+
 ## What it pulls from metascan
 
 - **At node-load time (dropdown population):** `GET /api/config` to list the directories metascan is watching, so the `directory` dropdown only offers valid targets.
