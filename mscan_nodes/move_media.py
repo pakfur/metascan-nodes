@@ -20,7 +20,12 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 from mscan_client.cache import combo_directories, OFFLINE_SENTINEL
-from mscan_nodes._shared import _build_client
+from mscan_nodes._shared import (
+    _build_client,
+    _utc_now,
+    resolve_target_dir,
+    wsl_to_native_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -240,5 +245,38 @@ class MetascanMoveMedia:
                 "Bring metascan up or add a MetascanSettings node with the "
                 "correct URL."
             )
-        # Real logic lands in Task 6.
-        raise NotImplementedError
+
+        save_flag, paths = filenames
+        paths = list(paths)
+        if not paths:
+            logger.debug("MetascanMoveMedia: empty filenames input — nothing to move")
+            return {
+                "ui": {"text": ["no files to move"]},
+                "result": ((save_flag, []), ""),
+            }
+
+        target_dir = resolve_target_dir(
+            directory=directory, subpath=subpath, now=_utc_now()
+        )
+
+        workflow_dict: Optional[dict] = None
+        if isinstance(extra_pnginfo, dict):
+            workflow_dict = extra_pnginfo.get("workflow")
+
+        new_paths: list[str] = []
+        ui_lines: list[str] = []
+        for src in paths:
+            src_native = Path(wsl_to_native_path(str(src)))
+            if not src_native.exists():
+                raise RuntimeError(
+                    f"MetascanMoveMedia: source not found: {src_native}"
+                )
+            new_path = relocate_file(src_native, target_dir, operation)
+            status = dispatch_metadata(new_path, prompt, workflow_dict, save_metadata)
+            new_paths.append(str(new_path))
+            ui_lines.append(f"{operation} {src_native} → {new_path} [{status}]")
+
+        return {
+            "ui": {"text": ui_lines},
+            "result": ((save_flag, new_paths), new_paths[0] if new_paths else ""),
+        }

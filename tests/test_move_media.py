@@ -454,6 +454,246 @@ def test_video_has_metadata_true_when_comment_tag_present(tmp_path, monkeypatch)
     assert move_media._video_has_metadata(p) is True
 
 
+# ----- process() integration -----
+
+def test_process_empty_filenames_returns_empty_and_no_error(tmp_path):
+    from mscan_nodes.move_media import MetascanMoveMedia
+    out = MetascanMoveMedia().process(
+        filenames=(True, []),
+        directory=str(tmp_path),
+        subpath="",
+        operation="move",
+        save_metadata="if_missing",
+        prompt=None,
+        extra_pnginfo=None,
+    )
+    assert out["result"][0] == (True, [])
+    assert out["result"][1] == ""
+    assert out["ui"]["text"]  # at least one line — the "no files" debug line
+
+
+def test_process_move_pipeline_end_to_end(tmp_path, monkeypatch):
+    """Real filesystem move into a real metascan dir + mocked ffmpeg
+    re-mux. Asserts the file lands, source disappears, returned
+    VHS_FILENAMES carries the new path, and UI text says 'embedded'."""
+    from mscan_nodes import move_media
+    src = tmp_path / "in" / "clip.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"original")
+    dst = tmp_path / "out"
+    dst.mkdir()
+
+    monkeypatch.setattr(move_media.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, check, capture_output, timeout):
+        # ffprobe path returns "no tags"; ffmpeg path writes staging.
+        if cmd[0] == "ffprobe":
+            class R:
+                stdout = b'{"format":{"tags":{}}}'
+                stderr = b""
+                returncode = 0
+            return R()
+        Path(cmd[-1]).write_bytes(b"remuxed")
+        class R:
+            stdout = b""
+            stderr = b""
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(move_media.subprocess, "run", fake_run)
+
+    out = move_media.MetascanMoveMedia().process(
+        filenames=(True, [str(src)]),
+        directory=str(dst),
+        subpath="",
+        operation="move",
+        save_metadata="if_missing",
+        prompt={"p": 1},
+        extra_pnginfo={"workflow": {"nodes": []}},
+    )
+
+    (save_flag, new_paths), first = out["result"]
+    assert save_flag is True
+    assert len(new_paths) == 1
+    assert Path(new_paths[0]).read_bytes() == b"remuxed"
+    assert not src.exists()  # moved, not copied
+    assert "embedded" in out["ui"]["text"][0]
+    assert first == new_paths[0]
+
+
+def test_process_copy_preserves_save_flag_false(tmp_path, monkeypatch):
+    """save_flag from VHS_FILENAMES is opaque to us; pass it through."""
+    from mscan_nodes import move_media
+    src = tmp_path / "clip.png"
+    Image.new("RGB", (4, 4)).save(src)
+    dst = tmp_path / "out"
+    dst.mkdir()
+
+    out = move_media.MetascanMoveMedia().process(
+        filenames=(False, [str(src)]),
+        directory=str(dst),
+        subpath="",
+        operation="copy",
+        save_metadata="always",
+        prompt={"p": 1},
+        extra_pnginfo=None,
+    )
+
+    (save_flag, _), _ = out["result"]
+    assert save_flag is False
+    assert src.exists()  # copy
+
+
+def test_process_subpath_strftime_expansion(tmp_path, monkeypatch):
+    from mscan_nodes import move_media
+    src = tmp_path / "clip.png"
+    Image.new("RGB", (4, 4)).save(src)
+    dst = tmp_path / "out"
+    dst.mkdir()
+
+    import datetime as dt
+    monkeypatch.setattr(move_media, "_utc_now", lambda: dt.datetime(2026, 5, 23))
+
+    out = move_media.MetascanMoveMedia().process(
+        filenames=(True, [str(src)]),
+        directory=str(dst),
+        subpath="%Y-%m",
+        operation="copy",
+        save_metadata="if_missing",
+        prompt=None,
+        extra_pnginfo=None,
+    )
+
+    new_path = Path(out["result"][0][1][0])
+    assert new_path.parent == dst / "2026-05"
+    assert new_path.name == "clip.png"
+
+
+def test_process_missing_source_raises_runtime(tmp_path):
+    from mscan_nodes.move_media import MetascanMoveMedia
+    dst = tmp_path / "out"
+    dst.mkdir()
+    with pytest.raises(RuntimeError, match="source not found"):
+        MetascanMoveMedia().process(
+            filenames=(True, [str(tmp_path / "does-not-exist.mp4")]),
+            directory=str(dst),
+            subpath="",
+            operation="move",
+            save_metadata="if_missing",
+            prompt=None,
+            extra_pnginfo=None,
+        )
+
+
+def test_process_wsl_translation_on_source_and_destination(tmp_path, monkeypatch):
+    """When sys.platform is win32 and either the directory or a source
+    path comes in as /mnt/<drive>/..., both get translated through
+    wsl_to_native_path before the filesystem call."""
+    from mscan_nodes import move_media
+    monkeypatch.setattr("sys.platform", "win32")
+
+    seen = {}
+
+    def fake_resolve(directory, subpath, now):
+        seen["directory"] = directory
+        # Hand back a real tmp dir so the move can succeed
+        return tmp_path
+
+    monkeypatch.setattr(move_media, "resolve_target_dir", fake_resolve)
+
+    # Pre-create a "translated" source path
+    src = tmp_path / "src.png"
+    Image.new("RGB", (4, 4)).save(src)
+
+    def fake_wsl(path: str) -> str:
+        seen.setdefault("translated", []).append(path)
+        if path == "/mnt/d/dst":
+            return "D:\\dst"
+        if path.startswith("/mnt/d/src/"):
+            return str(src)
+        return path
+
+    monkeypatch.setattr(move_media, "wsl_to_native_path", fake_wsl)
+
+    move_media.MetascanMoveMedia().process(
+        filenames=(True, ["/mnt/d/src/clip.png"]),
+        directory="/mnt/d/dst",
+        subpath="",
+        operation="copy",
+        save_metadata="if_missing",
+        prompt=None,
+        extra_pnginfo=None,
+    )
+
+    # Source went through wsl_to_native_path; directory went through
+    # the (stubbed) resolve_target_dir which receives the raw string.
+    assert "/mnt/d/src/clip.png" in seen["translated"]
+    assert seen["directory"] == "/mnt/d/dst"
+
+
+def test_process_passes_prompt_and_workflow_to_dispatch(tmp_path, monkeypatch):
+    """prompt and extra_pnginfo['workflow'] must flow through to
+    dispatch_metadata unchanged. Without this plumbing, metascan's
+    extractor reads back empty values."""
+    from mscan_nodes import move_media
+    src = tmp_path / "x.png"
+    Image.new("RGB", (4, 4)).save(src)
+    dst = tmp_path / "out"
+    dst.mkdir()
+
+    captured = {}
+
+    def fake_dispatch(path, prompt, workflow, mode):
+        captured["prompt"] = prompt
+        captured["workflow"] = workflow
+        captured["mode"] = mode
+        return "embedded"
+
+    monkeypatch.setattr(move_media, "dispatch_metadata", fake_dispatch)
+
+    move_media.MetascanMoveMedia().process(
+        filenames=(True, [str(src)]),
+        directory=str(dst),
+        subpath="",
+        operation="copy",
+        save_metadata="always",
+        prompt={"the": "prompt"},
+        extra_pnginfo={"workflow": {"the": "workflow"}, "other": "ignored"},
+    )
+
+    assert captured["prompt"] == {"the": "prompt"}
+    assert captured["workflow"] == {"the": "workflow"}
+    assert captured["mode"] == "always"
+
+
+def test_process_returns_ui_text_line_per_file(tmp_path, monkeypatch):
+    from mscan_nodes import move_media
+    srcs = []
+    for i in range(3):
+        p = tmp_path / f"in_{i}.png"
+        Image.new("RGB", (4, 4)).save(p)
+        srcs.append(str(p))
+    dst = tmp_path / "out"
+    dst.mkdir()
+
+    out = move_media.MetascanMoveMedia().process(
+        filenames=(True, srcs),
+        directory=str(dst),
+        subpath="",
+        operation="move",
+        save_metadata="always",
+        prompt={"p": 1},
+        extra_pnginfo=None,
+    )
+
+    text = out["ui"]["text"]
+    assert len(text) == 3
+    for i, line in enumerate(text):
+        assert line.startswith("move ")
+        assert f"in_{i}.png" in line
+        assert "[embedded]" in line
+
+
 def test_video_has_metadata_false_when_no_matching_tags(tmp_path, monkeypatch):
     from mscan_nodes import move_media
     p = tmp_path / "x.mp4"
