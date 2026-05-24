@@ -8,3 +8,4 @@ htmlcov/
 venv/
 *.swp
 .DS_Store
+.worktrees/
